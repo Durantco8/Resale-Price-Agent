@@ -1,18 +1,19 @@
-"""LLM decision layer — uses Claude API tool use for structured output."""
+"""LLM decision layer — uses Gemini API with JSON schema for structured output."""
 
 import json
 import logging
 import os
 from dataclasses import dataclass
 
-import anthropic
+from google import genai
+from google.genai import types
 
 from resale_price_agent.db import insert_decision
 from resale_price_agent.signals import TrendSignals
 
 log = logging.getLogger(__name__)
 
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = "gemini-2.0-flash"
 
 SYSTEM_PROMPT = """\
 You are a resale market analyst. You are given price trend signals and a \
@@ -20,34 +21,28 @@ summary of current listings for a specific item on eBay. Your job is to \
 decide whether now is a good time to buy, whether to wait for a better \
 price, or whether to skip this item entirely.
 
-Use the record_decision tool to report your decision. Base your reasoning \
+Respond with a JSON object containing your decision. Base your reasoning \
 on the signals provided — do not invent data. Be concise."""
 
-DECISION_TOOL = {
-    "name": "record_decision",
-    "description": "Record a buy/wait/skip decision for the tracked item.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["buy_now", "wait", "skip"],
-                "description": "Recommended action.",
-            },
-            "confidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "description": "Confidence in the recommendation (0-1).",
-            },
-            "reasoning": {
-                "type": "string",
-                "description": "Brief explanation of the decision.",
-            },
-        },
-        "required": ["action", "confidence", "reasoning"],
+DECISION_SCHEMA = types.Schema(
+    type=types.Type.OBJECT,
+    properties={
+        "action": types.Schema(
+            type=types.Type.STRING,
+            enum=["buy_now", "wait", "skip"],
+            description="Recommended action.",
+        ),
+        "confidence": types.Schema(
+            type=types.Type.NUMBER,
+            description="Confidence in the recommendation (0 to 1).",
+        ),
+        "reasoning": types.Schema(
+            type=types.Type.STRING,
+            description="Brief explanation of the decision.",
+        ),
     },
-}
+    required=["action", "confidence", "reasoning"],
+)
 
 
 @dataclass(frozen=True)
@@ -93,28 +88,25 @@ def get_llm_decision(
         )
 
     if client is None:
-        client = anthropic.Anthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        client = genai.Client(
+            api_key=os.environ.get("GEMINI_API_KEY", ""),
         )
 
     signals_dict = signals.to_dict()
 
     try:
-        response = client.messages.create(
+        response = client.models.generate_content(
             model=model,
-            max_tokens=512,
-            system=SYSTEM_PROMPT,
-            tools=[DECISION_TOOL],
-            tool_choice={"type": "tool", "name": "record_decision"},
-            messages=[
-                {
-                    "role": "user",
-                    "content": _build_user_message(signals_dict, listing_summary),
-                }
-            ],
+            contents=_build_user_message(signals_dict, listing_summary),
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=DECISION_SCHEMA,
+                max_output_tokens=512,
+            ),
         )
     except Exception:
-        reason = "Claude API call failed"
+        reason = "Gemini API call failed"
         log.exception("  #%d: %s", tracked_item_id, reason)
         return LLMDecision(
             action="skip",
@@ -124,11 +116,11 @@ def get_llm_decision(
             skip_reason="api_error",
         )
 
-    # --- Parse the tool-use response ---
+    # --- Parse the JSON response ---
     decision = _parse_response(response)
     if decision is None:
         reason = "Could not parse LLM response"
-        log.warning("  #%d: %s — raw: %s", tracked_item_id, reason, response)
+        log.warning("  #%d: %s — raw: %s", tracked_item_id, reason, getattr(response, 'text', ''))
         return LLMDecision(
             action="skip",
             confidence=0.0,
@@ -155,29 +147,30 @@ def get_llm_decision(
 
 
 def _parse_response(response) -> LLMDecision | None:
-    """Extract a valid LLMDecision from the Claude tool-use response."""
+    """Extract a valid LLMDecision from the Gemini JSON response."""
     try:
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "record_decision":
-                inp = block.input
-                action = inp.get("action")
-                confidence = inp.get("confidence")
-                reasoning = inp.get("reasoning")
+        text = response.text
+        if not text:
+            return None
+        data = json.loads(text)
 
-                if action not in ("buy_now", "wait", "skip"):
-                    return None
-                if not isinstance(confidence, (int, float)) or not (0 <= confidence <= 1):
-                    return None
-                if not isinstance(reasoning, str) or not reasoning:
-                    return None
+        action = data.get("action")
+        confidence = data.get("confidence")
+        reasoning = data.get("reasoning")
 
-                return LLMDecision(
-                    action=action,
-                    confidence=float(confidence),
-                    reasoning=reasoning,
-                    skipped=False,
-                    skip_reason=None,
-                )
+        if action not in ("buy_now", "wait", "skip"):
+            return None
+        if not isinstance(confidence, (int, float)) or not (0 <= confidence <= 1):
+            return None
+        if not isinstance(reasoning, str) or not reasoning:
+            return None
+
+        return LLMDecision(
+            action=action,
+            confidence=float(confidence),
+            reasoning=reasoning,
+            skipped=False,
+            skip_reason=None,
+        )
     except Exception:
         return None
-    return None

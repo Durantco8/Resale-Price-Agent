@@ -27,35 +27,46 @@ def engine():
 
 
 # ---------------------------------------------------------------------------
-# Helpers for faking Claude responses
+# Helpers for faking Gemini responses
 # ---------------------------------------------------------------------------
 
-def _tool_block(action="wait", confidence=0.7, reasoning="Prices are stable."):
-    return SimpleNamespace(
-        type="tool_use",
-        name="record_decision",
-        input={"action": action, "confidence": confidence, "reasoning": reasoning},
-    )
+def _make_response(text):
+    """Build an object that quacks like a Gemini GenerateContentResponse."""
+    return SimpleNamespace(text=text)
 
 
-def _make_response(*content_blocks):
-    return SimpleNamespace(content=list(content_blocks))
+def _json_response(action="wait", confidence=0.7, reasoning="Prices are stable."):
+    return _make_response(json.dumps({
+        "action": action,
+        "confidence": confidence,
+        "reasoning": reasoning,
+    }))
 
 
-class FakeClient:
-    """Drop-in fake for anthropic.Anthropic — records calls, returns preset."""
+class FakeModels:
+    """Fake for client.models — records calls, returns preset response."""
 
     def __init__(self, response=None, error=None):
         self._response = response
         self._error = error
         self.calls = []
-        self.messages = self  # client.messages.create(...)
 
-    def create(self, **kwargs):
+    def generate_content(self, **kwargs):
         self.calls.append(kwargs)
         if self._error:
             raise self._error
         return self._response
+
+
+class FakeClient:
+    """Drop-in fake for genai.Client."""
+
+    def __init__(self, response=None, error=None):
+        self.models = FakeModels(response=response, error=error)
+
+    @property
+    def calls(self):
+        return self.models.calls
 
 
 def _sufficient_signals(**overrides):
@@ -126,10 +137,9 @@ class TestInsufficientData:
 class TestValidResponse:
     def test_buy_now(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("buy_now", 0.9, "Prices dropping, high supply.")
-        )
-        fake = FakeClient(response=resp)
+        fake = FakeClient(response=_json_response(
+            "buy_now", 0.9, "Prices dropping, high supply."
+        ))
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "5 listings avg $195",
@@ -143,13 +153,10 @@ class TestValidResponse:
 
     def test_wait(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("wait", 0.6, "Trend unclear.")
-        )
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "3 listings",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_json_response("wait", 0.6, "Trend unclear.")),
         )
 
         assert result.action == "wait"
@@ -157,26 +164,20 @@ class TestValidResponse:
 
     def test_skip(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("skip", 0.3, "Not worth tracking.")
-        )
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "1 listing",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_json_response("skip", 0.3, "Not worth tracking.")),
         )
 
         assert result.action == "skip"
 
     def test_decision_stored_in_db(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("buy_now", 0.85, "Great price.")
-        )
 
         get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_json_response("buy_now", 0.85, "Great price.")),
         )
 
         decisions = get_decisions_for_item(engine, item_id)
@@ -191,8 +192,7 @@ class TestValidResponse:
 
     def test_signals_forwarded_to_api(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(_tool_block())
-        fake = FakeClient(response=resp)
+        fake = FakeClient(response=_json_response())
 
         get_llm_decision(
             engine, item_id, _sufficient_signals(), "listing summary",
@@ -202,9 +202,9 @@ class TestValidResponse:
         assert len(fake.calls) == 1
         call = fake.calls[0]
         assert call["model"] is not None
-        user_msg = call["messages"][0]["content"]
-        assert "avg_price" in user_msg
-        assert "listing summary" in user_msg
+        contents = call["contents"]
+        assert "avg_price" in contents
+        assert "listing summary" in contents
 
 
 # ---------------------------------------------------------------------------
@@ -214,13 +214,10 @@ class TestValidResponse:
 class TestMalformedResponse:
     def test_invalid_action(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("hold", 0.5, "Invalid action value.")
-        )
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_json_response("hold", 0.5, "Invalid action.")),
         )
 
         assert result.skipped is True
@@ -229,13 +226,10 @@ class TestMalformedResponse:
 
     def test_confidence_out_of_range(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("buy_now", 1.5, "Too confident.")
-        )
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_json_response("buy_now", 1.5, "Too confident.")),
         )
 
         assert result.skipped is True
@@ -243,66 +237,74 @@ class TestMalformedResponse:
 
     def test_negative_confidence(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("wait", -0.1, "Negative confidence.")
-        )
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_json_response("wait", -0.1, "Negative.")),
         )
 
         assert result.skipped is True
 
     def test_empty_reasoning(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = _make_response(
-            _tool_block("wait", 0.5, "")
-        )
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_json_response("wait", 0.5, "")),
         )
 
         assert result.skipped is True
 
-    def test_missing_tool_use_block(self, engine):
+    def test_not_json(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        text_block = SimpleNamespace(type="text", text="I think you should wait.")
-        resp = _make_response(text_block)
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_make_response("I think you should wait.")),
         )
 
         assert result.skipped is True
         assert result.skip_reason == "parse_error"
 
-    def test_wrong_tool_name(self, engine):
+    def test_empty_response_text(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        block = SimpleNamespace(
-            type="tool_use",
-            name="wrong_tool",
-            input={"action": "buy_now", "confidence": 0.8, "reasoning": "test"},
-        )
-        resp = _make_response(block)
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=_make_response("")),
+        )
+
+        assert result.skipped is True
+        assert result.skip_reason == "parse_error"
+
+    def test_none_response_text(self, engine):
+        item_id = add_tracked_item(engine, "Jordan 4")
+
+        result = get_llm_decision(
+            engine, item_id, _sufficient_signals(), "summary",
+            client=FakeClient(response=_make_response(None)),
+        )
+
+        assert result.skipped is True
+        assert result.skip_reason == "parse_error"
+
+    def test_missing_fields(self, engine):
+        item_id = add_tracked_item(engine, "Jordan 4")
+
+        result = get_llm_decision(
+            engine, item_id, _sufficient_signals(), "summary",
+            client=FakeClient(response=_make_response('{"action": "buy_now"}')),
         )
 
         assert result.skipped is True
 
-    def test_completely_garbled_response(self, engine):
+    def test_response_without_text_attr(self, engine):
+        """Response object missing .text entirely."""
         item_id = add_tracked_item(engine, "Jordan 4")
-        resp = SimpleNamespace(content=None)  # content isn't iterable
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=FakeClient(response=resp),
+            client=FakeClient(response=SimpleNamespace()),  # no .text
         )
 
         assert result.skipped is True
@@ -316,11 +318,10 @@ class TestMalformedResponse:
 class TestAPIErrors:
     def test_api_timeout(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        fake = FakeClient(error=TimeoutError("Request timed out"))
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=fake,
+            client=FakeClient(error=TimeoutError("Request timed out")),
         )
 
         assert result.skipped is True
@@ -329,11 +330,10 @@ class TestAPIErrors:
 
     def test_api_connection_error(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        fake = FakeClient(error=ConnectionError("Network unreachable"))
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=fake,
+            client=FakeClient(error=ConnectionError("Network unreachable")),
         )
 
         assert result.skipped is True
@@ -341,11 +341,10 @@ class TestAPIErrors:
 
     def test_api_rate_limit(self, engine):
         item_id = add_tracked_item(engine, "Jordan 4")
-        fake = FakeClient(error=RuntimeError("rate_limit_error"))
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
-            client=fake,
+            client=FakeClient(error=RuntimeError("RESOURCE_EXHAUSTED")),
         )
 
         assert result.skipped is True
@@ -358,34 +357,28 @@ class TestAPIErrors:
 
 class TestParseResponse:
     def test_valid(self):
-        resp = _make_response(_tool_block("buy_now", 0.8, "Good price."))
-        result = _parse_response(resp)
-
+        result = _parse_response(_json_response("buy_now", 0.8, "Good price."))
         assert result is not None
         assert result.action == "buy_now"
 
     def test_confidence_zero(self):
-        resp = _make_response(_tool_block("skip", 0.0, "No idea."))
-        result = _parse_response(resp)
-
+        result = _parse_response(_json_response("skip", 0.0, "No idea."))
         assert result is not None
         assert result.confidence == 0.0
 
     def test_confidence_one(self):
-        resp = _make_response(_tool_block("buy_now", 1.0, "Certain."))
-        result = _parse_response(resp)
-
+        result = _parse_response(_json_response("buy_now", 1.0, "Certain."))
         assert result is not None
         assert result.confidence == 1.0
 
     def test_integer_confidence(self):
         """Confidence of 1 (int) should be accepted."""
-        resp = _make_response(_tool_block("wait", 1, "Sure."))
-        result = _parse_response(resp)
-
+        result = _parse_response(_json_response("wait", 1, "Sure."))
         assert result is not None
         assert result.confidence == 1.0
 
-    def test_none_on_empty_content(self):
-        resp = _make_response()
-        assert _parse_response(resp) is None
+    def test_none_on_empty_text(self):
+        assert _parse_response(_make_response("")) is None
+
+    def test_none_on_invalid_json(self):
+        assert _parse_response(_make_response("{broken")) is None
