@@ -130,7 +130,8 @@ class TestShouldNotSend:
 
         assert result is False
 
-    def test_no_recipient_no_email(self):
+    def test_no_recipient_no_email(self, monkeypatch):
+        monkeypatch.setattr("resale_price_agent.notifier.NOTIFY_TO", "")
         sent = []
         def fake_send(to, subject, body):
             sent.append(True)

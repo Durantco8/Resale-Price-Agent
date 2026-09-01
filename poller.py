@@ -17,6 +17,7 @@ from resale_price_agent.db import (
     get_active_tracked_items,
     get_decisions_for_item,
     get_engine,
+    get_snapshots_for_item,
     insert_snapshots,
 )
 from resale_price_agent.ebay_client import EbayClient, ListingSnapshot
@@ -72,10 +73,10 @@ def _send_notify(query, decision, send_fn, recipient):
 
 
 def poll_once(engine=None, ebay_client=None, llm_client=None, send_fn=None,
-              notify_recipient=None):
+              notify_recipient=None, skip_ebay=False):
     if engine is None:
         engine = get_engine()
-    if ebay_client is None:
+    if ebay_client is None and not skip_ebay:
         ebay_client = EbayClient()
 
     items = get_active_tracked_items(engine)
@@ -99,15 +100,23 @@ def poll_once(engine=None, ebay_client=None, llm_client=None, send_fn=None,
 
         try:
             # --- Stage 4: Fetch and store ---
-            listings = ebay_client.search_listings(query)
-            snapshot_dicts = [snapshot_to_dict(s) for s in listings]
-            count = insert_snapshots(engine, item_id, snapshot_dicts)
-            total_listings += count
-            processed += 1
-            log.info(
-                "  #%d  \"%s\"  — %d listing(s) stored",
-                item_id, query, count,
-            )
+            if skip_ebay:
+                snapshot_dicts = get_snapshots_for_item(engine, item_id, limit=50)
+                processed += 1
+                log.info(
+                    "  #%d  \"%s\"  — skipped eBay, using %d existing snapshot(s)",
+                    item_id, query, len(snapshot_dicts),
+                )
+            else:
+                listings = ebay_client.search_listings(query)
+                snapshot_dicts = [snapshot_to_dict(s) for s in listings]
+                count = insert_snapshots(engine, item_id, snapshot_dicts)
+                total_listings += count
+                processed += 1
+                log.info(
+                    "  #%d  \"%s\"  — %d listing(s) stored",
+                    item_id, query, count,
+                )
 
             # --- Stage 5: Price-drop detection ---
             alert_ids = check_price_drops(
@@ -162,4 +171,9 @@ def poll_once(engine=None, ebay_client=None, llm_client=None, send_fn=None,
 
 
 if __name__ == "__main__":
-    poll_once()
+    import argparse
+    parser = argparse.ArgumentParser(description="Run the resale price agent pipeline.")
+    parser.add_argument("--skip-ebay", action="store_true",
+                        help="Skip eBay fetch, run detection on existing snapshots in DB")
+    args = parser.parse_args()
+    poll_once(skip_ebay=args.skip_ebay)
