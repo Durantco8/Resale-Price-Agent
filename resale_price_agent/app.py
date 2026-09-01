@@ -9,6 +9,7 @@ engine and run without any real API calls.
 """
 
 from flask import Flask, g, jsonify, request
+from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import create_engine
@@ -16,6 +17,7 @@ from sqlalchemy import create_engine
 from resale_price_agent.db import (
     create_alert,
     get_decisions_for_item,
+    get_seeded_items,
     get_snapshots_for_item,
     get_tracked_item,
     metadata,
@@ -37,6 +39,9 @@ def create_app(config=None):
         engine = create_engine(db_url, echo=False)
         metadata.create_all(engine)
         app.config["ENGINE"] = engine
+
+    # --- CORS ---
+    CORS(app)
 
     # --- Rate limiter ---
     limiter = Limiter(
@@ -117,6 +122,26 @@ def create_app(config=None):
         if success:
             return jsonify({"message": "You have been unsubscribed."})
         return jsonify({"error": "Invalid or expired unsubscribe link."}), 404
+
+    @app.route("/api/trending")
+    def api_trending():
+        items = get_seeded_items(engine)
+        results = []
+        for item in items:
+            snap_count = len(get_snapshots_for_item(engine, item["id"]))
+            latest_decision = None
+            decs = get_decisions_for_item(engine, item["id"], limit=1)
+            if decs:
+                latest_decision = _serialize_row(decs[0])
+            results.append({
+                "tracked_item": _serialize_item(item),
+                "snapshot_count": snap_count,
+                "status": item["status"],
+                "latest_decision": latest_decision,
+            })
+        # Richest data first
+        results.sort(key=lambda r: r["snapshot_count"], reverse=True)
+        return jsonify(results)
 
     @app.route("/api/items/<int:item_id>")
     def api_item_detail(item_id):
