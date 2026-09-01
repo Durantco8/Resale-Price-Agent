@@ -177,13 +177,15 @@ def insert_snapshots(engine, tracked_item_id: int, snapshots: list[dict]) -> int
 
 
 def get_snapshots_for_item(
-    engine, tracked_item_id: int, limit: int | None = None
+    engine, tracked_item_id: int, limit: int | None = None, since: datetime | None = None,
 ) -> list[dict]:
     stmt = (
         listing_snapshots.select()
         .where(listing_snapshots.c.tracked_item_id == tracked_item_id)
         .order_by(listing_snapshots.c.snapshot_time.desc())
     )
+    if since is not None:
+        stmt = stmt.where(listing_snapshots.c.snapshot_time >= since)
     if limit is not None:
         stmt = stmt.limit(limit)
     with engine.connect() as conn:
