@@ -249,3 +249,101 @@ class TestSignals:
         assert "ebay_item_id" in signals
         assert signals["ebay_item_id"] == "new-1"
         assert signals["title"] == "Jordan 4 Military Black"
+
+
+# ---------------------------------------------------------------------------
+# Throttling — dedup and daily cap
+# ---------------------------------------------------------------------------
+
+class TestThrottlingDedup:
+    def test_same_listing_twice_only_one_alert(self, engine):
+        """Same eBay listing ID across two poll cycles → only the first fires."""
+        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        snap = [_snap("listing-A", 180.0)]
+
+        first = check_price_drops(engine, item_id, snap, target_price=200.0)
+        second = check_price_drops(engine, item_id, snap, target_price=200.0)
+
+        assert len(first) == 1
+        assert len(second) == 0
+
+    def test_different_listings_both_alert(self, engine):
+        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+
+        a1 = check_price_drops(
+            engine, item_id, [_snap("listing-A", 180.0)], target_price=200.0,
+        )
+        a2 = check_price_drops(
+            engine, item_id, [_snap("listing-B", 175.0)], target_price=200.0,
+        )
+
+        assert len(a1) == 1
+        assert len(a2) == 1
+
+    def test_same_listing_in_one_batch_deduped(self, engine):
+        """Two snapshots with the same eBay ID in one call → one alert."""
+        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        snaps = [
+            _snap("listing-A", 180.0),
+            _snap("listing-A", 179.0),
+        ]
+
+        alerts = check_price_drops(engine, item_id, snaps, target_price=200.0)
+        assert len(alerts) == 1
+
+    def test_dedup_window_expiry_allows_realert(self, engine):
+        """After the dedup window passes, the same listing can re-alert."""
+        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        snap = [_snap("listing-A", 180.0)]
+
+        first = check_price_drops(
+            engine, item_id, snap, target_price=200.0, dedup_window_hours=1,
+        )
+        assert len(first) == 1
+
+        # Move the existing alert's timestamp back 2 hours so it's outside
+        # the 1-hour window.
+        from resale_price_agent.db import decisions as dec_table
+        with engine.begin() as conn:
+            conn.execute(
+                dec_table.update()
+                .where(dec_table.c.id == first[0])
+                .values(timestamp=datetime.now(timezone.utc) - timedelta(hours=2))
+            )
+
+        second = check_price_drops(
+            engine, item_id, snap, target_price=200.0, dedup_window_hours=1,
+        )
+        assert len(second) == 1
+
+
+class TestThrottlingDailyCap:
+    def test_cap_stops_further_alerts(self, engine):
+        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        snaps = [_snap(f"listing-{i}", 180.0) for i in range(5)]
+
+        alerts = check_price_drops(
+            engine, item_id, snaps, target_price=200.0, daily_cap=3,
+        )
+
+        assert len(alerts) == 3
+
+    def test_cap_counts_existing_alerts(self, engine):
+        """Cap accounts for alerts already fired earlier today."""
+        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+
+        # Fire 2 alerts first
+        first = check_price_drops(
+            engine, item_id,
+            [_snap("a", 180.0), _snap("b", 180.0)],
+            target_price=200.0, daily_cap=3,
+        )
+        assert len(first) == 2
+
+        # Only 1 more should be allowed
+        second = check_price_drops(
+            engine, item_id,
+            [_snap("c", 180.0), _snap("d", 180.0)],
+            target_price=200.0, daily_cap=3,
+        )
+        assert len(second) == 1

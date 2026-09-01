@@ -228,6 +228,27 @@ def get_decisions_for_item(
         return [dict(r._mapping) for r in rows]
 
 
+def get_recent_alerts(
+    engine, tracked_item_id: int, since: datetime | None = None,
+) -> list[dict]:
+    """Return price_drop_alert decisions for a tracked item since *since*.
+
+    Used by throttling logic to avoid duplicate alerts on the same eBay
+    listing and to enforce daily caps.
+    """
+    stmt = (
+        decisions.select()
+        .where(decisions.c.tracked_item_id == tracked_item_id)
+        .where(decisions.c.event_type == "price_drop_alert")
+    )
+    if since is not None:
+        stmt = stmt.where(decisions.c.timestamp >= since)
+    stmt = stmt.order_by(decisions.c.timestamp.desc())
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+
 def update_decision_outcome(engine, decision_id: int, outcome: str) -> bool:
     with engine.begin() as conn:
         result = conn.execute(

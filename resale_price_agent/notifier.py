@@ -43,18 +43,20 @@ def _format_price_drop_email(item_query: str, decision: dict) -> tuple[str, str]
 
     subject = f"Price drop alert: {item_query}"
 
+    price_fmt = f"${price:.2f}" if isinstance(price, (int, float)) else f"${price}"
+
     lines = [
         f"Item: {title}",
         f"Search: {item_query}",
-        f"Price: ${price}",
+        f"Price: {price_fmt}",
         "",
         f"Why: {reasoning}",
     ]
 
-    if signals.get("target_price"):
-        lines.append(f"Your target price: ${signals['target_price']}")
-    if signals.get("rolling_avg"):
-        lines.append(f"Rolling average: ${signals['rolling_avg']}")
+    if signals.get("target_price") is not None:
+        lines.append(f"Your target price: ${signals['target_price']:.2f}")
+    if signals.get("rolling_avg") is not None:
+        lines.append(f"Rolling average: ${signals['rolling_avg']:.2f}")
     if item_url:
         lines.append(f"\nListing: {item_url}")
 
