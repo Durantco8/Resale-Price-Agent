@@ -3,6 +3,9 @@
 import argparse
 import sys
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from resale_price_agent.db import (
     add_tracked_item,
     get_all_tracked_items,

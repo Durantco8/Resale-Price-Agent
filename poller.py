@@ -10,6 +10,9 @@ One item's failure never blocks the others.
 
 import logging
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from resale_price_agent.db import (
     get_active_tracked_items,
     get_decisions_for_item,
