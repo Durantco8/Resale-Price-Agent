@@ -114,6 +114,12 @@ def get_tracked_item(engine, item_id: int) -> dict | None:
         return dict(row._mapping) if row else None
 
 
+def get_all_tracked_items(engine) -> list[dict]:
+    with engine.connect() as conn:
+        rows = conn.execute(tracked_items.select()).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+
 def get_active_tracked_items(engine) -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(
