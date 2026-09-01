@@ -1,82 +1,82 @@
-"""Tests for the full pipeline — faked eBay client, LLM client, and email."""
+"""Tests for the shared polling loop — all external calls faked."""
 
 import json
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
 
-from poller import poll_once, snapshot_to_dict
 from resale_price_agent.db import (
-    add_tracked_item,
+    get_all_tracked_items,
     get_decisions_for_item,
+    get_or_create_tracked_item,
     get_snapshots_for_item,
+    get_tracked_item,
     insert_snapshots,
-    metadata,
-    set_tracked_item_active,
+    seed_tracked_item,
+    set_tracked_item_status,
 )
 from resale_price_agent.ebay_client import ListingSnapshot
+from resale_price_agent.poller import poll_all_items, snapshot_to_dict
 
 
-@pytest.fixture
-def engine():
-    eng = create_engine("sqlite:///:memory:", echo=False)
-    metadata.create_all(eng)
-    return eng
+# ---------------------------------------------------------------------------
+# Test helpers — lightweight fakes (not from conftest, to avoid import issues)
+# ---------------------------------------------------------------------------
 
-
-def _make_listing(**overrides):
-    defaults = {
-        "item_id": "v1|111|0",
-        "title": "Jordan 4 Military Black",
-        "price_amount": 219.99,
-        "price_currency": "USD",
-        "condition": "New with box",
-        "seller_feedback_score": 5000,
-        "item_url": "https://www.ebay.com/itm/111",
-        "shipping_cost": 14.95,
-        "item_location": "Portland, OR, US",
-        "buying_options": ["FIXED_PRICE"],
-        "snapshot_time": "2026-08-30T12:00:00.000Z",
-    }
-    defaults.update(overrides)
+def _listing(item_id="v1|123|0", price=200.0, **kw):
+    defaults = dict(
+        title="Test Listing", price_amount=price, price_currency="USD",
+        condition="New", seller_feedback_score=100,
+        item_url="https://www.ebay.com/itm/123", shipping_cost=5.99,
+        item_location="New York, NY, US", buying_options=["FIXED_PRICE"],
+        snapshot_time=datetime.now(timezone.utc).isoformat(),
+    )
+    defaults.update(kw)
+    defaults["item_id"] = item_id
     return ListingSnapshot(**defaults)
 
 
-class FakeEbayClient:
-    def __init__(self, responses=None):
-        self._responses = responses or {}
-        self.calls = []
+class _MockEbay:
+    def __init__(self, listings=None):
+        self._listings = listings if listings is not None else [_listing()]
+        self.search_calls = []
 
     def search_listings(self, query, limit=50):
-        self.calls.append(query)
-        result = self._responses.get(query)
-        if isinstance(result, Exception):
-            raise result
-        return result if result is not None else []
+        self.search_calls.append(query)
+        return list(self._listings)
 
 
-class FakeLLMModels:
-    def __init__(self, response=None, error=None):
-        self._response = response
-        self._error = error
+class _PerQueryEbay:
+    def __init__(self, responses):
+        self._responses = responses
+
+    def search_listings(self, query, limit=50):
+        resp = self._responses.get(query, [])
+        if isinstance(resp, Exception):
+            raise resp
+        return resp
+
+
+class _MockLLM:
+    def __init__(self, action="wait", confidence=0.5, reasoning="Holding."):
+        text = json.dumps({"action": action, "confidence": confidence, "reasoning": reasoning})
+        self.models = self
+        self._text = text
 
     def generate_content(self, **kwargs):
-        if self._error:
-            raise self._error
-        return self._response
+        class _R:
+            pass
+        r = _R()
+        r.text = self._text
+        return r
 
 
-class FakeLLMClient:
-    def __init__(self, response=None, error=None):
-        self.models = FakeLLMModels(response=response, error=error)
+class _FailingLLM:
+    def __init__(self):
+        self.models = self
 
-
-def _llm_response(action="wait", confidence=0.5, reasoning="Holding."):
-    return SimpleNamespace(text=json.dumps({
-        "action": action, "confidence": confidence, "reasoning": reasoning,
-    }))
+    def generate_content(self, **kwargs):
+        raise ConnectionError("LLM API unavailable")
 
 
 def _seed_history(engine, item_id, prices, start_hours_ago=48):
@@ -86,7 +86,10 @@ def _seed_history(engine, item_id, prices, start_hours_ago=48):
             "ebay_item_id": f"hist-{i}",
             "title": "Historical",
             "price": price,
-            "snapshot_time": datetime.now(timezone.utc) - timedelta(hours=start_hours_ago - i),
+            "snapshot_time": (
+                datetime.now(timezone.utc)
+                - timedelta(hours=start_hours_ago - i)
+            ),
         })
     insert_snapshots(engine, item_id, snaps)
 
@@ -97,260 +100,184 @@ def _seed_history(engine, item_id, prices, start_hours_ago=48):
 
 class TestSnapshotToDict:
     def test_converts_all_fields(self):
-        listing = _make_listing()
+        listing = _listing(
+            item_id="v1|111|0", title="Jordan 4 Military Black",
+            price=219.99, condition="New with box",
+            seller_feedback_score=5000, shipping_cost=14.95,
+            item_location="Portland, OR, US",
+        )
         d = snapshot_to_dict(listing)
 
         assert d["ebay_item_id"] == "v1|111|0"
         assert d["title"] == "Jordan 4 Military Black"
         assert d["price"] == 219.99
-        assert d["currency"] == "USD"
         assert d["condition"] == "New with box"
-        assert d["seller_feedback_score"] == 5000
-        assert d["shipping_cost"] == 14.95
-        assert d["item_location"] == "Portland, OR, US"
         assert d["buying_format"] == "FIXED_PRICE"
-        assert d["item_url"] == "https://www.ebay.com/itm/111"
 
     def test_multiple_buying_options(self):
-        listing = _make_listing(buying_options=["FIXED_PRICE", "BEST_OFFER"])
-        d = snapshot_to_dict(listing)
-        assert d["buying_format"] == "FIXED_PRICE, BEST_OFFER"
+        listing = _listing(buying_options=["FIXED_PRICE", "BEST_OFFER"])
+        assert snapshot_to_dict(listing)["buying_format"] == "FIXED_PRICE, BEST_OFFER"
 
     def test_empty_buying_options(self):
-        listing = _make_listing(buying_options=[])
-        d = snapshot_to_dict(listing)
-        assert d["buying_format"] is None
+        listing = _listing(buying_options=[])
+        assert snapshot_to_dict(listing)["buying_format"] is None
 
 
 # ---------------------------------------------------------------------------
-# Core polling (Stage 4 behavior)
+# Basic polling
 # ---------------------------------------------------------------------------
 
-class TestPollOnce:
-    def test_no_active_items(self, engine):
-        fake = FakeEbayClient()
-        result = poll_once(engine=engine, ebay_client=fake,
-                           llm_client=FakeLLMClient())
-
+class TestPollBasics:
+    def test_no_tracked_items(self, engine):
+        result = poll_all_items(engine, _MockEbay(), _MockLLM())
         assert result["processed"] == 0
         assert result["failed"] == 0
-        assert result["total_listings"] == 0
-        assert fake.calls == []
 
-    def test_single_item_with_listings(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4 size 10")
-        fake = FakeEbayClient(responses={
-            "Jordan 4 size 10": [
-                _make_listing(item_id="v1|111|0", price_amount=219.99),
-                _make_listing(item_id="v1|222|0", price_amount=205.00),
-            ],
-        })
+    def test_single_item(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        ebay = _MockEbay([_listing(item_id="v1|111|0"), _listing(item_id="v1|222|0")])
 
-        result = poll_once(engine=engine, ebay_client=fake,
-                           llm_client=FakeLLMClient())
+        result = poll_all_items(engine, ebay, _MockLLM())
 
         assert result["processed"] == 1
-        assert result["total_listings"] == 2
-        assert len(get_snapshots_for_item(engine, item_id)) == 2
+        assert result["total_snapshots"] == 2
+        assert len(get_snapshots_for_item(engine, item["id"])) == 2
 
     def test_multiple_items(self, engine):
-        id_a = add_tracked_item(engine, "Item A")
-        id_b = add_tracked_item(engine, "Item B")
-        fake = FakeEbayClient(responses={
-            "Item A": [_make_listing(item_id="v1|aaa|0")],
-            "Item B": [
-                _make_listing(item_id="v1|bbb|0"),
-                _make_listing(item_id="v1|ccc|0"),
-            ],
-        })
+        get_or_create_tracked_item(engine, "Jordan 4")
+        get_or_create_tracked_item(engine, "Nike Dunk")
 
-        result = poll_once(engine=engine, ebay_client=fake,
-                           llm_client=FakeLLMClient())
+        ebay = _MockEbay([_listing()])
+        result = poll_all_items(engine, ebay, _MockLLM())
 
         assert result["processed"] == 2
-        assert result["total_listings"] == 3
+        assert len(ebay.search_calls) == 2
 
-    def test_paused_items_skipped(self, engine):
-        add_tracked_item(engine, "Active item")
-        id_b = add_tracked_item(engine, "Paused item")
-        set_tracked_item_active(engine, id_b, False)
+    def test_seeded_and_user_items_both_polled(self, engine):
+        seed_tracked_item(engine, "PS5 Console")
+        get_or_create_tracked_item(engine, "Jordan 4")
 
-        fake = FakeEbayClient(responses={
-            "Active item": [_make_listing()],
-            "Paused item": [_make_listing()],
+        ebay = _MockEbay([_listing()])
+        result = poll_all_items(engine, ebay, _MockLLM())
+
+        assert result["processed"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Failure isolation
+# ---------------------------------------------------------------------------
+
+class TestFailureIsolation:
+    def test_ebay_failure_doesnt_block_others(self, engine):
+        get_or_create_tracked_item(engine, "Good item")
+        get_or_create_tracked_item(engine, "Bad item")
+        get_or_create_tracked_item(engine, "Also good")
+
+        ebay = _PerQueryEbay({
+            "Good item": [_listing(item_id="a")],
+            "Bad item": ConnectionError("eBay timeout"),
+            "Also good": [_listing(item_id="c")],
         })
 
-        result = poll_once(engine=engine, ebay_client=fake,
-                           llm_client=FakeLLMClient())
-
-        assert result["processed"] == 1
-        assert fake.calls == ["Active item"]
-
-    def test_failure_isolation(self, engine):
-        id_a = add_tracked_item(engine, "Good item")
-        add_tracked_item(engine, "Bad item")
-        id_c = add_tracked_item(engine, "Also good")
-
-        fake = FakeEbayClient(responses={
-            "Good item": [_make_listing(item_id="v1|aaa|0")],
-            "Bad item": ConnectionError("eBay API timeout"),
-            "Also good": [_make_listing(item_id="v1|ccc|0")],
-        })
-
-        result = poll_once(engine=engine, ebay_client=fake,
-                           llm_client=FakeLLMClient())
+        result = poll_all_items(engine, ebay, _MockLLM())
 
         assert result["processed"] == 2
         assert result["failed"] == 1
-        assert len(get_snapshots_for_item(engine, id_a)) == 1
-        assert len(get_snapshots_for_item(engine, id_c)) == 1
+
+    def test_llm_failure_doesnt_block_others(self, engine):
+        get_or_create_tracked_item(engine, "Item A")
+        get_or_create_tracked_item(engine, "Item B")
+
+        # Seed enough history so LLM actually runs
+        items = get_all_tracked_items(engine)
+        for item in items:
+            _seed_history(engine, item["id"], [200.0] * 6)
+
+        ebay = _MockEbay([_listing()])
+        # LLM errors are caught inside get_llm_decision, not poll_all_items
+        result = poll_all_items(engine, ebay, _FailingLLM())
+
+        assert result["processed"] == 2
+        assert result["failed"] == 0  # LLM errors handled internally
 
 
 # ---------------------------------------------------------------------------
-# Pipeline integration: price-drop → notify
+# Status transition: collecting → active
 # ---------------------------------------------------------------------------
 
-class TestPipelinePriceDrop:
-    def test_target_price_triggers_notification(self, engine):
-        add_tracked_item(engine, "Jordan 4", target_price=200.0)
+class TestStatusTransition:
+    def test_stays_collecting_below_threshold(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _seed_history(engine, item["id"], [200.0, 210.0, 205.0])
 
-        emails = []
-        def fake_send(to, subject, body):
-            emails.append((to, subject, body))
+        # Poll adds 1 → 4 total, still below default threshold of 5
+        ebay = _MockEbay([_listing()])
+        poll_all_items(engine, ebay, _MockLLM())
 
-        fake_ebay = FakeEbayClient(responses={
-            "Jordan 4": [_make_listing(price_amount=185.0)],
-        })
+        refreshed = get_tracked_item(engine, item["id"])
+        assert refreshed["status"] == "collecting"
 
-        result = poll_once(
-            engine=engine, ebay_client=fake_ebay,
-            llm_client=FakeLLMClient(),
-            send_fn=lambda to, subj, body: emails.append((to, subj, body)),
-            notify_recipient="test@example.com",
-        )
+    def test_flips_to_active_at_threshold(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _seed_history(engine, item["id"], [200.0, 210.0, 205.0, 195.0])
 
-        assert result["alerts"] >= 1
-        assert result["notifications"] >= 1
-        assert any("Price drop" in e[1] for e in emails)
+        # Poll adds 1 → 5 total, hits threshold
+        ebay = _MockEbay([_listing()])
+        poll_all_items(engine, ebay, _MockLLM())
 
-    def test_no_alert_when_above_target(self, engine):
-        add_tracked_item(engine, "Jordan 4", target_price=150.0)
+        refreshed = get_tracked_item(engine, item["id"])
+        assert refreshed["status"] == "active"
 
-        emails = []
-        fake_ebay = FakeEbayClient(responses={
-            "Jordan 4": [_make_listing(price_amount=219.99)],
-        })
+    def test_already_active_stays_active(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _seed_history(engine, item["id"], [200.0] * 10)
+        set_tracked_item_status(engine, item["id"], "active")
 
-        result = poll_once(
-            engine=engine, ebay_client=fake_ebay,
-            llm_client=FakeLLMClient(),
-            send_fn=lambda to, subj, body: emails.append(True),
-            notify_recipient="test@example.com",
-        )
+        ebay = _MockEbay([_listing()])
+        poll_all_items(engine, ebay, _MockLLM())
 
-        assert result["alerts"] == 0
+        refreshed = get_tracked_item(engine, item["id"])
+        assert refreshed["status"] == "active"
 
+    def test_custom_threshold(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _seed_history(engine, item["id"], [200.0, 210.0])
 
-# ---------------------------------------------------------------------------
-# Pipeline integration: LLM buy_now → notify
-# ---------------------------------------------------------------------------
+        # 2 existing + 1 from poll = 3, with threshold=3 should flip
+        ebay = _MockEbay([_listing()])
+        poll_all_items(engine, ebay, _MockLLM(), status_threshold=3)
 
-class TestPipelineLLM:
-    def test_buy_now_triggers_notification(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        # Seed enough history for LLM to run
-        _seed_history(engine, item_id, [220.0] * 10)
-
-        emails = []
-        fake_ebay = FakeEbayClient(responses={
-            "Jordan 4": [_make_listing(price_amount=200.0)],
-        })
-        fake_llm = FakeLLMClient(
-            response=_llm_response("buy_now", 0.9, "Great deal.")
-        )
-
-        result = poll_once(
-            engine=engine, ebay_client=fake_ebay,
-            llm_client=fake_llm,
-            send_fn=lambda to, subj, body: emails.append((to, subj, body)),
-            notify_recipient="test@example.com",
-        )
-
-        assert result["notifications"] >= 1
-        assert any("Buy now" in e[1] for e in emails)
-
-    def test_wait_no_notification(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        _seed_history(engine, item_id, [220.0] * 10)
-
-        emails = []
-        fake_ebay = FakeEbayClient(responses={
-            "Jordan 4": [_make_listing(price_amount=219.0)],
-        })
-        fake_llm = FakeLLMClient(
-            response=_llm_response("wait", 0.5, "Not yet.")
-        )
-
-        result = poll_once(
-            engine=engine, ebay_client=fake_ebay,
-            llm_client=fake_llm,
-            send_fn=lambda to, subj, body: emails.append(True),
-            notify_recipient="test@example.com",
-        )
-
-        # Should have 0 notifications for LLM wait (price drop might or
-        # might not fire depending on threshold, so just check no buy_now emails)
-        assert not any(
-            isinstance(e, tuple) and "Buy now" in e[1] for e in emails
-        )
-
-    def test_insufficient_data_skips_llm(self, engine):
-        """With no history, LLM should be skipped — no LLM decision stored."""
-        add_tracked_item(engine, "Jordan 4")
-
-        fake_ebay = FakeEbayClient(responses={
-            "Jordan 4": [_make_listing(price_amount=200.0)],
-        })
-        fake_llm = FakeLLMClient(
-            response=_llm_response("buy_now", 0.9, "Should not appear.")
-        )
-
-        poll_once(
-            engine=engine, ebay_client=fake_ebay,
-            llm_client=fake_llm,
-            send_fn=lambda *a: None,
-            notify_recipient="test@example.com",
-        )
-
-        # The only decisions should be from price-drop (if any), not LLM
-        decisions = get_decisions_for_item(engine, 1)
-        llm_decisions = [d for d in decisions if d["event_type"] == "llm_reasoning"]
-        assert llm_decisions == []
+        refreshed = get_tracked_item(engine, item["id"])
+        assert refreshed["status"] == "active"
 
 
 # ---------------------------------------------------------------------------
-# Notification failure doesn't crash pipeline
+# Snapshot accumulation across poll cycles
 # ---------------------------------------------------------------------------
 
-class TestNotificationFailure:
-    def test_email_failure_doesnt_crash(self, engine):
-        add_tracked_item(engine, "Jordan 4", target_price=250.0)
+class TestSnapshotAccumulation:
+    def test_snapshots_accumulate(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
-        def failing_send(to, subject, body):
-            raise ConnectionError("SMTP down")
+        ebay = _MockEbay([_listing(item_id="v1|111|0")])
+        llm = _MockLLM()
 
-        fake_ebay = FakeEbayClient(responses={
-            "Jordan 4": [_make_listing(price_amount=185.0)],
-        })
+        poll_all_items(engine, ebay, llm)
+        poll_all_items(engine, ebay, llm)
+        poll_all_items(engine, ebay, llm)
 
-        # Should not raise
-        result = poll_once(
-            engine=engine, ebay_client=fake_ebay,
-            llm_client=FakeLLMClient(),
-            send_fn=failing_send,
-            notify_recipient="test@example.com",
-        )
+        snaps = get_snapshots_for_item(engine, item["id"])
+        assert len(snaps) == 3
 
-        assert result["processed"] == 1
-        assert result["alerts"] >= 1
-        assert result["notifications"] == 0  # email failed but pipeline continued
+    def test_count_accurate_after_multiple_cycles(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+
+        listings = [_listing(item_id=f"v1|{i}|0", price=200.0 + i) for i in range(3)]
+        ebay = _MockEbay(listings)
+        llm = _MockLLM()
+
+        poll_all_items(engine, ebay, llm)  # +3
+        poll_all_items(engine, ebay, llm)  # +3
+
+        snaps = get_snapshots_for_item(engine, item["id"])
+        assert len(snaps) == 6

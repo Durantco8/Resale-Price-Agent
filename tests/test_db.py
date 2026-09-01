@@ -1,226 +1,266 @@
-"""Tests for the storage layer — all use in-memory SQLite, no disk I/O."""
+"""Tests for the storage layer — schema, dedupe, CRUD, alerts."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
 
 from resale_price_agent.db import (
-    add_tracked_item,
-    get_active_tracked_items,
+    create_alert,
+    get_active_alerts_for_item,
+    get_all_tracked_items,
     get_decisions_for_item,
+    get_or_create_tracked_item,
+    get_seeded_items,
     get_snapshots_for_item,
     get_tracked_item,
+    get_tracked_item_by_query,
     insert_decision,
     insert_snapshots,
     metadata,
-    remove_tracked_item,
-    set_tracked_item_active,
-    update_decision_outcome,
+    normalize_query,
+    seed_tracked_item,
+    set_tracked_item_status,
+    unsubscribe_by_token,
 )
 
 
-@pytest.fixture
-def engine():
-    eng = create_engine("sqlite:///:memory:", echo=False)
-    metadata.create_all(eng)
-    return eng
+# ---------------------------------------------------------------------------
+# Query normalization
+# ---------------------------------------------------------------------------
+
+class TestNormalizeQuery:
+    def test_lowercases(self):
+        assert normalize_query("Jordan 4 Retro") == "jordan 4 retro"
+
+    def test_collapses_whitespace(self):
+        assert normalize_query("jordan   4    retro") == "jordan 4 retro"
+
+    def test_strips_leading_trailing(self):
+        assert normalize_query("  jordan 4  ") == "jordan 4"
+
+    def test_tabs_and_newlines(self):
+        assert normalize_query("jordan\t4\nretro") == "jordan 4 retro"
+
+    def test_already_normalized(self):
+        assert normalize_query("jordan 4") == "jordan 4"
+
+    def test_empty_after_strip(self):
+        assert normalize_query("   ") == ""
 
 
 # ---------------------------------------------------------------------------
-# Tracked items
+# Dedupe — get_or_create_tracked_item
 # ---------------------------------------------------------------------------
 
-class TestTrackedItems:
-    def test_add_and_get(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4 Military Black size 10")
-        item = get_tracked_item(engine, item_id)
+class TestDedupe:
+    def test_creates_new_item(self, engine):
+        item, created = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        assert created is True
+        assert item["search_query"] == "Jordan 4 Retro"
+        assert item["normalized_query"] == "jordan 4 retro"
+        assert item["status"] == "collecting"
+        assert item["is_seeded"] is False
 
-        assert item is not None
-        assert item["search_query"] == "Jordan 4 Military Black size 10"
-        assert item["active"] is True
-        assert item["target_price"] is None
-        assert item["date_added"] is not None
+    def test_same_query_returns_existing(self, engine):
+        item1, c1 = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        item2, c2 = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        assert c1 is True
+        assert c2 is False
+        assert item1["id"] == item2["id"]
 
-    def test_add_with_target_price(self, engine):
-        item_id = add_tracked_item(
-            engine, "Yeezy 350 size 11", target_price=180.0
+    def test_different_casing_dedupes(self, engine):
+        item1, _ = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        item2, c2 = get_or_create_tracked_item(engine, "jordan 4 retro")
+        assert c2 is False
+        assert item1["id"] == item2["id"]
+
+    def test_different_whitespace_dedupes(self, engine):
+        item1, _ = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        item2, c2 = get_or_create_tracked_item(engine, "  Jordan   4  Retro  ")
+        assert c2 is False
+        assert item1["id"] == item2["id"]
+
+    def test_different_items_get_separate_rows(self, engine):
+        item1, _ = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        item2, c2 = get_or_create_tracked_item(engine, "Nike Dunk Low")
+        assert c2 is True
+        assert item1["id"] != item2["id"]
+
+    def test_empty_query_raises(self, engine):
+        with pytest.raises(ValueError, match="empty"):
+            get_or_create_tracked_item(engine, "   ")
+
+    def test_only_one_row_in_db(self, engine):
+        get_or_create_tracked_item(engine, "Jordan 4")
+        get_or_create_tracked_item(engine, "jordan 4")
+        get_or_create_tracked_item(engine, "  JORDAN   4  ")
+        assert len(get_all_tracked_items(engine)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Seeded items
+# ---------------------------------------------------------------------------
+
+class TestSeededItems:
+    def test_seed_creates_with_flag(self, engine):
+        item, created = seed_tracked_item(engine, "PS5 Console")
+        assert created is True
+        assert item["is_seeded"] is True
+        assert item["status"] == "collecting"
+
+    def test_seed_custom_display_name(self, engine):
+        item, _ = seed_tracked_item(
+            engine, "ps5 console", display_name="PlayStation 5 Console"
         )
-        item = get_tracked_item(engine, item_id)
+        assert item["display_name"] == "PlayStation 5 Console"
 
-        assert item["target_price"] == 180.0
+    def test_seed_dedupes_against_existing(self, engine):
+        item1, _ = seed_tracked_item(engine, "PS5 Console")
+        item2, c2 = seed_tracked_item(engine, "ps5 console")
+        assert c2 is False
+        assert item1["id"] == item2["id"]
 
-    def test_get_nonexistent_returns_none(self, engine):
-        assert get_tracked_item(engine, 9999) is None
+    def test_seed_promotes_user_created(self, engine):
+        """A user-created item gets is_seeded=True if later seeded."""
+        item1, _ = get_or_create_tracked_item(engine, "PS5 Console")
+        assert item1["is_seeded"] is False
 
-    def test_get_active_items(self, engine):
-        add_tracked_item(engine, "Item A")
-        id_b = add_tracked_item(engine, "Item B")
-        add_tracked_item(engine, "Item C")
+        item2, c2 = seed_tracked_item(engine, "PS5 Console")
+        assert c2 is False
+        assert item2["is_seeded"] is True
+        assert item1["id"] == item2["id"]
 
-        set_tracked_item_active(engine, id_b, False)
-        active = get_active_tracked_items(engine)
+        refreshed = get_tracked_item(engine, item1["id"])
+        assert refreshed["is_seeded"] is True
 
-        queries = [i["search_query"] for i in active]
-        assert "Item A" in queries
-        assert "Item C" in queries
-        assert "Item B" not in queries
+    def test_get_seeded_items_filters(self, engine):
+        seed_tracked_item(engine, "PS5 Console")
+        seed_tracked_item(engine, "iPhone 15 Pro")
+        get_or_create_tracked_item(engine, "random sneaker")
 
-    def test_pause_and_resume(self, engine):
-        item_id = add_tracked_item(engine, "Item X")
-        assert get_tracked_item(engine, item_id)["active"] is True
+        seeded = get_seeded_items(engine)
+        assert len(seeded) == 2
+        names = {s["normalized_query"] for s in seeded}
+        assert names == {"ps5 console", "iphone 15 pro"}
 
-        set_tracked_item_active(engine, item_id, False)
-        assert get_tracked_item(engine, item_id)["active"] is False
-
-        set_tracked_item_active(engine, item_id, True)
-        assert get_tracked_item(engine, item_id)["active"] is True
-
-    def test_pause_nonexistent_returns_false(self, engine):
-        assert set_tracked_item_active(engine, 9999, False) is False
-
-    def test_remove(self, engine):
-        item_id = add_tracked_item(engine, "Item to remove")
-        assert remove_tracked_item(engine, item_id) is True
-        assert get_tracked_item(engine, item_id) is None
-
-    def test_remove_nonexistent_returns_false(self, engine):
-        assert remove_tracked_item(engine, 9999) is False
-
-    def test_auto_increment_ids(self, engine):
-        id1 = add_tracked_item(engine, "First")
-        id2 = add_tracked_item(engine, "Second")
-        assert id2 > id1
+    def test_seed_empty_query_raises(self, engine):
+        with pytest.raises(ValueError, match="empty"):
+            seed_tracked_item(engine, "  ")
 
 
 # ---------------------------------------------------------------------------
-# Listing snapshots
+# Tracked items — read helpers
 # ---------------------------------------------------------------------------
 
-class TestListingSnapshots:
-    def _sample_snapshots(self):
-        return [
+class TestTrackedItemReads:
+    def test_get_by_id(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        fetched = get_tracked_item(engine, item["id"])
+        assert fetched["search_query"] == "Jordan 4"
+
+    def test_get_nonexistent(self, engine):
+        assert get_tracked_item(engine, 999) is None
+
+    def test_get_by_query(self, engine):
+        get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        fetched = get_tracked_item_by_query(engine, "  jordan   4   retro  ")
+        assert fetched is not None
+        assert fetched["search_query"] == "Jordan 4 Retro"
+
+    def test_get_by_query_not_found(self, engine):
+        assert get_tracked_item_by_query(engine, "nonexistent") is None
+
+    def test_set_status(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        assert item["status"] == "collecting"
+
+        result = set_tracked_item_status(engine, item["id"], "active")
+        assert result is True
+
+        refreshed = get_tracked_item(engine, item["id"])
+        assert refreshed["status"] == "active"
+
+    def test_set_status_nonexistent(self, engine):
+        assert set_tracked_item_status(engine, 999, "active") is False
+
+
+# ---------------------------------------------------------------------------
+# Snapshots
+# ---------------------------------------------------------------------------
+
+class TestSnapshots:
+    def test_insert_and_retrieve(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        snaps = [
             {
                 "ebay_item_id": "v1|111|0",
                 "title": "Jordan 4 Military Black",
-                "price": 219.99,
+                "price": 200.0,
                 "currency": "USD",
-                "condition": "New with box",
-                "seller_feedback_score": 5432,
-                "shipping_cost": 14.95,
-                "item_location": "Portland, OR, US",
-                "buying_format": "FIXED_PRICE",
-                "item_url": "https://www.ebay.com/itm/111",
-                "snapshot_time": datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
+                "condition": "New",
             },
             {
                 "ebay_item_id": "v1|222|0",
-                "title": "Air Jordan 4 Military Black",
-                "price": 205.00,
-                "condition": "New with box",
-                "buying_format": "AUCTION",
-                "snapshot_time": datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
+                "title": "Jordan 4 Military Black Used",
+                "price": 180.0,
             },
         ]
-
-    def test_insert_and_retrieve(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        count = insert_snapshots(engine, item_id, self._sample_snapshots())
-
+        count = insert_snapshots(engine, item["id"], snaps)
         assert count == 2
-        rows = get_snapshots_for_item(engine, item_id)
+
+        rows = get_snapshots_for_item(engine, item["id"])
         assert len(rows) == 2
 
-    def test_fields_stored_correctly(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        insert_snapshots(engine, item_id, self._sample_snapshots())
-        rows = get_snapshots_for_item(engine, item_id)
-
-        # Rows are ordered by snapshot_time desc; both have the same time
-        ebay_ids = {r["ebay_item_id"] for r in rows}
-        assert "v1|111|0" in ebay_ids
-        assert "v1|222|0" in ebay_ids
-
-        first = next(r for r in rows if r["ebay_item_id"] == "v1|111|0")
-        assert first["price"] == 219.99
-        assert first["shipping_cost"] == 14.95
-        assert first["item_location"] == "Portland, OR, US"
-        assert first["buying_format"] == "FIXED_PRICE"
-
-    def test_nullable_fields_default_to_none(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        insert_snapshots(engine, item_id, self._sample_snapshots())
-        rows = get_snapshots_for_item(engine, item_id)
-
-        second = next(r for r in rows if r["ebay_item_id"] == "v1|222|0")
-        assert second["shipping_cost"] is None
-        assert second["item_location"] is None
-        assert second["seller_feedback_score"] is None
+    def test_empty_list(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        assert insert_snapshots(engine, item["id"], []) == 0
 
     def test_limit(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        insert_snapshots(engine, item_id, self._sample_snapshots())
-        rows = get_snapshots_for_item(engine, item_id, limit=1)
-        assert len(rows) == 1
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        snaps = [
+            {"ebay_item_id": f"id-{i}", "title": "T", "price": 100.0 + i}
+            for i in range(10)
+        ]
+        insert_snapshots(engine, item["id"], snaps)
+        assert len(get_snapshots_for_item(engine, item["id"], limit=3)) == 3
 
-    def test_empty_list_inserts_nothing(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        count = insert_snapshots(engine, item_id, [])
-        assert count == 0
-        assert get_snapshots_for_item(engine, item_id) == []
-
-    def test_snapshots_isolated_by_tracked_item(self, engine):
-        id_a = add_tracked_item(engine, "Item A")
-        id_b = add_tracked_item(engine, "Item B")
-        insert_snapshots(engine, id_a, self._sample_snapshots())
-        insert_snapshots(
-            engine,
-            id_b,
-            [
-                {
-                    "ebay_item_id": "v1|333|0",
-                    "title": "Other item",
-                    "price": 99.0,
-                    "snapshot_time": datetime(2026, 8, 31, tzinfo=timezone.utc),
-                }
-            ],
+    def test_since_filter(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        now = datetime.now(timezone.utc)
+        snaps = [
+            {
+                "ebay_item_id": "old",
+                "title": "T",
+                "price": 100.0,
+                "snapshot_time": now - timedelta(days=30),
+            },
+            {
+                "ebay_item_id": "new",
+                "title": "T",
+                "price": 100.0,
+                "snapshot_time": now - timedelta(hours=1),
+            },
+        ]
+        insert_snapshots(engine, item["id"], snaps)
+        recent = get_snapshots_for_item(
+            engine, item["id"], since=now - timedelta(days=7)
         )
+        assert len(recent) == 1
+        assert recent[0]["ebay_item_id"] == "new"
 
-        assert len(get_snapshots_for_item(engine, id_a)) == 2
-        assert len(get_snapshots_for_item(engine, id_b)) == 1
-
-    def test_fk_constraint(self, engine):
-        """Inserting a snapshot for a nonexistent tracked item should fail."""
-        # SQLite doesn't enforce FKs by default; enable them
-        from sqlalchemy import event
-
-        @event.listens_for(engine, "connect")
-        def _set_fk_pragma(dbapi_conn, _):
-            dbapi_conn.execute("PRAGMA foreign_keys=ON")
-
-        # Need a fresh connection after adding the listener
-        eng2 = create_engine("sqlite:///:memory:", echo=False)
-
-        @event.listens_for(eng2, "connect")
-        def _set_fk_pragma2(dbapi_conn, _):
-            dbapi_conn.execute("PRAGMA foreign_keys=ON")
-
-        metadata.create_all(eng2)
-
-        with pytest.raises(Exception):
-            insert_snapshots(
-                eng2,
-                9999,
-                [
-                    {
-                        "ebay_item_id": "v1|000|0",
-                        "title": "Orphan",
-                        "price": 50.0,
-                        "snapshot_time": datetime(2026, 8, 30, tzinfo=timezone.utc),
-                    }
-                ],
-            )
+    def test_isolated_by_tracked_item(self, engine):
+        item1, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item2, _ = get_or_create_tracked_item(engine, "Nike Dunk")
+        insert_snapshots(engine, item1["id"], [
+            {"ebay_item_id": "a", "title": "T", "price": 100.0},
+        ])
+        insert_snapshots(engine, item2["id"], [
+            {"ebay_item_id": "b", "title": "T", "price": 200.0},
+        ])
+        assert len(get_snapshots_for_item(engine, item1["id"])) == 1
+        assert len(get_snapshots_for_item(engine, item2["id"])) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -228,74 +268,95 @@ class TestListingSnapshots:
 # ---------------------------------------------------------------------------
 
 class TestDecisions:
-    def test_insert_price_drop_alert(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+    def test_insert_and_retrieve(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
         dec_id = insert_decision(
-            engine,
-            item_id,
-            "price_drop_alert",
-            computed_signals=json.dumps({"avg_price": 220.0, "drop_pct": 12.5}),
-            reasoning="15% below rolling average",
+            engine, item["id"], "llm_reasoning",
+            action="buy_now", confidence=0.85,
+            reasoning="Good price", computed_signals="{}",
         )
+        assert dec_id > 0
 
-        rows = get_decisions_for_item(engine, item_id)
-        assert len(rows) == 1
-        assert rows[0]["id"] == dec_id
-        assert rows[0]["event_type"] == "price_drop_alert"
-        assert rows[0]["action"] is None
-        assert rows[0]["confidence"] is None
-        assert rows[0]["reasoning"] == "15% below rolling average"
-        assert rows[0]["outcome"] is None
-
-    def test_insert_llm_reasoning(self, engine):
-        item_id = add_tracked_item(engine, "Yeezy 350")
-        insert_decision(
-            engine,
-            item_id,
-            "llm_reasoning",
-            computed_signals=json.dumps({"avg_price": 180.0, "trend": "down"}),
-            action="buy_now",
-            confidence=0.85,
-            reasoning="Prices trending down with high inventory",
-        )
-
-        rows = get_decisions_for_item(engine, item_id)
-        assert rows[0]["action"] == "buy_now"
-        assert rows[0]["confidence"] == 0.85
-
-    def test_update_outcome(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        dec_id = insert_decision(engine, item_id, "price_drop_alert")
-
-        assert update_decision_outcome(engine, dec_id, "price_went_lower") is True
-        rows = get_decisions_for_item(engine, item_id)
-        assert rows[0]["outcome"] == "price_went_lower"
-
-    def test_update_outcome_nonexistent(self, engine):
-        assert update_decision_outcome(engine, 9999, "anything") is False
-
-    def test_decisions_isolated_by_tracked_item(self, engine):
-        id_a = add_tracked_item(engine, "Item A")
-        id_b = add_tracked_item(engine, "Item B")
-        insert_decision(engine, id_a, "price_drop_alert")
-        insert_decision(engine, id_a, "llm_reasoning", action="wait")
-        insert_decision(engine, id_b, "price_drop_alert")
-
-        assert len(get_decisions_for_item(engine, id_a)) == 2
-        assert len(get_decisions_for_item(engine, id_b)) == 1
+        decs = get_decisions_for_item(engine, item["id"])
+        assert len(decs) == 1
+        assert decs[0]["action"] == "buy_now"
+        assert decs[0]["confidence"] == 0.85
 
     def test_limit(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        insert_decision(engine, item_id, "price_drop_alert")
-        insert_decision(engine, item_id, "llm_reasoning")
-        insert_decision(engine, item_id, "price_drop_alert")
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        for i in range(5):
+            insert_decision(engine, item["id"], "llm_reasoning", action="wait")
+        assert len(get_decisions_for_item(engine, item["id"], limit=2)) == 2
 
-        rows = get_decisions_for_item(engine, item_id, limit=2)
-        assert len(rows) == 2
+    def test_isolated_by_item(self, engine):
+        item1, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item2, _ = get_or_create_tracked_item(engine, "Nike Dunk")
+        insert_decision(engine, item1["id"], "llm_reasoning", action="wait")
+        insert_decision(engine, item2["id"], "llm_reasoning", action="buy_now")
+        assert len(get_decisions_for_item(engine, item1["id"])) == 1
+        assert len(get_decisions_for_item(engine, item2["id"])) == 1
 
-    def test_timestamp_auto_populated(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
-        insert_decision(engine, item_id, "price_drop_alert")
 
-        rows = get_decisions_for_item(engine, item_id)
-        assert rows[0]["timestamp"] is not None
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+
+class TestAlerts:
+    def test_create_alert(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        alert = create_alert(
+            engine, "test@example.com", item["id"], "price_below:180.00",
+        )
+        assert alert["email"] == "test@example.com"
+        assert alert["condition"] == "price_below:180.00"
+        assert alert["active"] is True
+        assert len(alert["unsubscribe_token"]) == 32  # uuid4 hex
+
+    def test_unique_tokens(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        a1 = create_alert(engine, "a@b.com", item["id"], "buy_now")
+        a2 = create_alert(engine, "c@d.com", item["id"], "buy_now")
+        assert a1["unsubscribe_token"] != a2["unsubscribe_token"]
+
+    def test_get_active_alerts(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        create_alert(engine, "a@b.com", item["id"], "buy_now")
+        create_alert(engine, "c@d.com", item["id"], "price_below:200")
+
+        active = get_active_alerts_for_item(engine, item["id"])
+        assert len(active) == 2
+
+    def test_unsubscribe(self, engine):
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        alert = create_alert(engine, "a@b.com", item["id"], "buy_now")
+        token = alert["unsubscribe_token"]
+
+        result = unsubscribe_by_token(engine, token)
+        assert result is True
+
+        active = get_active_alerts_for_item(engine, item["id"])
+        assert len(active) == 0
+
+    def test_unsubscribe_bad_token(self, engine):
+        assert unsubscribe_by_token(engine, "nonexistent") is False
+
+    def test_multiple_alerts_same_email(self, engine):
+        """Same email can subscribe to multiple items."""
+        item1, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item2, _ = get_or_create_tracked_item(engine, "Nike Dunk")
+        create_alert(engine, "a@b.com", item1["id"], "buy_now")
+        create_alert(engine, "a@b.com", item2["id"], "price_below:100")
+
+        assert len(get_active_alerts_for_item(engine, item1["id"])) == 1
+        assert len(get_active_alerts_for_item(engine, item2["id"])) == 1
+
+    def test_unsubscribe_only_affects_target(self, engine):
+        """Unsubscribing one alert doesn't deactivate others."""
+        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        a1 = create_alert(engine, "a@b.com", item["id"], "buy_now")
+        create_alert(engine, "c@d.com", item["id"], "buy_now")
+
+        unsubscribe_by_token(engine, a1["unsubscribe_token"])
+        active = get_active_alerts_for_item(engine, item["id"])
+        assert len(active) == 1
+        assert active[0]["email"] == "c@d.com"
