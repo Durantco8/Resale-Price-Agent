@@ -13,7 +13,7 @@ from resale_price_agent.signals import TrendSignals
 
 log = logging.getLogger(__name__)
 
-MODEL = "gemini-2.0-flash"
+MODEL = "gemini-3.5-flash"
 
 SYSTEM_PROMPT = """\
 You are a resale market analyst. You are given price trend signals and a \
