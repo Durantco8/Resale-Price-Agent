@@ -83,6 +83,7 @@ def check_price_drops(
         signals["listing_price"] = price
         signals["ebay_item_id"] = snap.get("ebay_item_id", "")
         signals["title"] = snap.get("title", "")
+        signals["item_url"] = snap.get("item_url", "")
 
         dec_id = insert_decision(
             engine,
