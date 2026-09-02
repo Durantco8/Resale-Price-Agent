@@ -13,8 +13,16 @@ def test_manage_items_imports():
     import manage_items  # noqa: F401
 
 
+def test_dev_server_imports():
+    import dev_server  # noqa: F401
+
+
 def test_package_poller_imports():
     from resale_price_agent import poller  # noqa: F401
+
+
+def test_package_app_imports():
+    from resale_price_agent import app  # noqa: F401
 
 
 def test_package_price_drop_imports():
