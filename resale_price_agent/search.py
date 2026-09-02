@@ -23,7 +23,7 @@ def search(engine, raw_query: str) -> dict:
         snapshot_count — total snapshots available
         status        — the item's current status ("collecting" or "active")
     """
-    item, created = get_or_create_tracked_item(engine, raw_query)
+    item, created, _ = get_or_create_tracked_item(engine, raw_query)
     item_id = item["id"]
 
     item_snapshots = get_snapshots_for_item(engine, item_id)

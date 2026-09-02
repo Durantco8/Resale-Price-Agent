@@ -72,7 +72,7 @@ class TestSearch:
         assert data["created"] is False
 
     def test_returns_snapshots_and_decisions(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4 Retro")
         insert_snapshots(engine, item["id"], [
             {"ebay_item_id": "v1|111|0", "title": "J4", "price": 200.0},
         ])
@@ -106,7 +106,7 @@ class TestSearch:
 
 class TestCreateAlert:
     def test_create_price_alert(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         resp = client.post("/api/alerts", json={
             "email": "user@example.com",
@@ -122,7 +122,7 @@ class TestCreateAlert:
         assert "id" in data
 
     def test_create_buy_now_alert(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         resp = client.post("/api/alerts", json={
             "email": "user@example.com",
@@ -133,7 +133,7 @@ class TestCreateAlert:
         assert resp.status_code == 201
 
     def test_token_not_in_response(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         resp = client.post("/api/alerts", json={
             "email": "user@example.com",
@@ -145,7 +145,7 @@ class TestCreateAlert:
         assert "unsubscribe_token" not in data
 
     def test_missing_email_400(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         resp = client.post("/api/alerts", json={
             "tracked_item_id": item["id"],
@@ -154,7 +154,7 @@ class TestCreateAlert:
         assert resp.status_code == 400
 
     def test_invalid_email_400(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         resp = client.post("/api/alerts", json={
             "email": "not-an-email",
@@ -164,7 +164,7 @@ class TestCreateAlert:
         assert resp.status_code == 400
 
     def test_missing_condition_400(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         resp = client.post("/api/alerts", json={
             "email": "a@b.com",
@@ -192,7 +192,7 @@ class TestCreateAlert:
 
 class TestUnsubscribe:
     def test_valid_token(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         alert = create_alert(engine, "a@b.com", item["id"], "buy_now")
 
         resp = client.get(f"/api/unsubscribe/{alert['unsubscribe_token']}")
@@ -206,7 +206,7 @@ class TestUnsubscribe:
 
     def test_double_unsubscribe_is_harmless(self, client, engine):
         """Clicking the unsubscribe link twice is safe — both return 200."""
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         alert = create_alert(engine, "a@b.com", item["id"], "buy_now")
         token = alert["unsubscribe_token"]
 
@@ -222,7 +222,7 @@ class TestUnsubscribe:
 
 class TestItemDetail:
     def test_existing_item(self, client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         insert_snapshots(engine, item["id"], [
             {"ebay_item_id": "v1|111|0", "title": "J4", "price": 200.0},
             {"ebay_item_id": "v1|222|0", "title": "J4 Used", "price": 180.0},
@@ -261,7 +261,7 @@ class TestRateLimiting:
         assert resp.status_code == 429
 
     def test_alert_rate_limit(self, rate_limited_client, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         for i in range(2):
             resp = rate_limited_client.post("/api/alerts", json={

@@ -134,7 +134,7 @@ class TestPollBasics:
         assert result["failed"] == 0
 
     def test_single_item(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         ebay = _MockEbay([_listing(item_id="v1|111|0"), _listing(item_id="v1|222|0")])
 
         result = poll_all_items(engine, ebay, _MockLLM())
@@ -207,7 +207,7 @@ class TestFailureIsolation:
 
 class TestStatusTransition:
     def test_stays_collecting_below_threshold(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         _seed_history(engine, item["id"], [200.0, 210.0, 205.0])
 
         # Poll adds 1 → 4 total, still below default threshold of 5
@@ -218,7 +218,7 @@ class TestStatusTransition:
         assert refreshed["status"] == "collecting"
 
     def test_flips_to_active_at_threshold(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         _seed_history(engine, item["id"], [200.0, 210.0, 205.0, 195.0])
 
         # Poll adds 1 → 5 total, hits threshold
@@ -229,7 +229,7 @@ class TestStatusTransition:
         assert refreshed["status"] == "active"
 
     def test_already_active_stays_active(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         _seed_history(engine, item["id"], [200.0] * 10)
         set_tracked_item_status(engine, item["id"], "active")
 
@@ -240,7 +240,7 @@ class TestStatusTransition:
         assert refreshed["status"] == "active"
 
     def test_custom_threshold(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         _seed_history(engine, item["id"], [200.0, 210.0])
 
         # 2 existing + 1 from poll = 3, with threshold=3 should flip
@@ -257,7 +257,7 @@ class TestStatusTransition:
 
 class TestSnapshotAccumulation:
     def test_snapshots_accumulate(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         ebay = _MockEbay([_listing(item_id="v1|111|0")])
         llm = _MockLLM()
@@ -270,7 +270,7 @@ class TestSnapshotAccumulation:
         assert len(snaps) == 3
 
     def test_count_accurate_after_multiple_cycles(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         listings = [_listing(item_id=f"v1|{i}|0", price=200.0 + i) for i in range(3)]
         ebay = _MockEbay(listings)

@@ -237,7 +237,7 @@ class TestSendAlertEmail:
 
 class TestProcessAlerts:
     def test_sends_matching_alerts(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         create_alert(engine, "user@example.com", item["id"], "price_below:200.00")
 
         sender = FakeSender()
@@ -250,7 +250,7 @@ class TestProcessAlerts:
         assert sender.sent[0][0] == "user@example.com"
 
     def test_no_alerts_no_emails(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         sender = FakeSender()
         sent = process_alerts(
@@ -261,7 +261,7 @@ class TestProcessAlerts:
         assert sender.sent == []
 
     def test_non_matching_alerts_no_emails(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         create_alert(engine, "user@example.com", item["id"], "price_below:150.00")
 
         sender = FakeSender()
@@ -272,7 +272,7 @@ class TestProcessAlerts:
         assert sent == 0
 
     def test_send_failure_counted_correctly(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         create_alert(engine, "user@example.com", item["id"], "price_below:200.00")
 
         sent = process_alerts(
@@ -288,7 +288,7 @@ class TestProcessAlerts:
 
 class TestUnsubscribe:
     def test_unsubscribe_deactivates(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         alert = create_alert(engine, "a@b.com", item["id"], "buy_now")
 
         result = unsubscribe_by_token(engine, alert["unsubscribe_token"])
@@ -298,7 +298,7 @@ class TestUnsubscribe:
         assert len(active) == 0
 
     def test_unsubscribed_alert_doesnt_fire(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         alert = create_alert(engine, "a@b.com", item["id"], "price_below:200.00")
         unsubscribe_by_token(engine, alert["unsubscribe_token"])
 
@@ -315,7 +315,7 @@ class TestUnsubscribe:
         assert result is False
 
     def test_unsubscribe_only_affects_one_alert(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         a1 = create_alert(engine, "a@b.com", item["id"], "price_below:200.00")
         create_alert(engine, "c@d.com", item["id"], "price_below:200.00")
 

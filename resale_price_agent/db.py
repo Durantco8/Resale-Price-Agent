@@ -38,6 +38,7 @@ tracked_items = Table(
     Column("normalized_query", String, nullable=False),
     Column("display_name", String, nullable=False),
     Column("is_seeded", Boolean, nullable=False, default=False),
+    Column("owner", String, nullable=True, default=None),
     Column("status", String, nullable=False, default="collecting"),
     Column("created_at", DateTime, nullable=False),
     UniqueConstraint("normalized_query", name="uq_tracked_items_normalized_query"),
@@ -129,12 +130,13 @@ def normalize_query(raw: str) -> str:
 
 
 def get_or_create_tracked_item(
-    engine, raw_query: str,
-) -> tuple[dict, bool]:
+    engine, raw_query: str, owner: str | None = None,
+) -> tuple[dict, bool, bool]:
     """Find or create a tracked_item for *raw_query*.
 
-    Returns ``(row_dict, created)`` where *created* is True if a new row
-    was inserted.  Deduplication is based on ``normalized_query``.
+    Returns ``(row_dict, created, claimed)`` where *created* is True if a
+    new row was inserted, and *claimed* is True if an existing unowned
+    item had its ``owner`` field set by this call.
     """
     norm = normalize_query(raw_query)
     if not norm:
@@ -148,7 +150,18 @@ def get_or_create_tracked_item(
             )
         ).fetchone()
         if row:
-            return dict(row._mapping), False
+            row_dict = dict(row._mapping)
+            claimed = False
+            if owner and row_dict.get("owner") is None:
+                with engine.begin() as conn2:
+                    conn2.execute(
+                        tracked_items.update()
+                        .where(tracked_items.c.id == row_dict["id"])
+                        .values(owner=owner)
+                    )
+                row_dict["owner"] = owner
+                claimed = True
+            return row_dict, False, claimed
 
     # Insert new row
     with engine.begin() as conn:
@@ -158,6 +171,7 @@ def get_or_create_tracked_item(
                 normalized_query=norm,
                 display_name=raw_query.strip(),
                 is_seeded=False,
+                owner=owner,
                 status="collecting",
                 created_at=datetime.now(timezone.utc),
             )
@@ -169,7 +183,7 @@ def get_or_create_tracked_item(
         row = conn.execute(
             tracked_items.select().where(tracked_items.c.id == item_id)
         ).fetchone()
-        return dict(row._mapping), True
+        return dict(row._mapping), True, False
 
 
 def seed_tracked_item(

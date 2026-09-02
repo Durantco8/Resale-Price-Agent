@@ -52,7 +52,7 @@ class TestExistingSearch:
         assert result["created"] is False
 
     def test_returns_snapshots_and_decisions(self, engine):
-        item, _ = get_or_create_tracked_item(engine, "Jordan 4 Retro")
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4 Retro")
         insert_snapshots(engine, item["id"], [
             {"ebay_item_id": "v1|111|0", "title": "Jordan 4", "price": 200.0},
             {"ebay_item_id": "v1|222|0", "title": "Jordan 4 Used", "price": 180.0},

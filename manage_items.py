@@ -16,7 +16,7 @@ from resale_price_agent.db import (
 
 
 def cmd_add(args, engine):
-    item, created = get_or_create_tracked_item(engine, args.query)
+    item, created, _ = get_or_create_tracked_item(engine, args.query)
     if created:
         print(f"Added item #{item['id']}: \"{item['display_name']}\"")
     else:
