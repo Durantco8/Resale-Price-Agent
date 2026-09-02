@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from resale_price_agent.db import (
-    get_active_tracked_items,
+    get_all_tracked_items,
     get_decisions_for_item,
     get_engine,
     get_snapshots_for_item,
@@ -79,7 +79,7 @@ def poll_once(engine=None, ebay_client=None, llm_client=None, send_fn=None,
     if ebay_client is None and not skip_ebay:
         ebay_client = EbayClient()
 
-    items = get_active_tracked_items(engine)
+    items = get_all_tracked_items(engine)
     if not items:
         log.info("No active tracked items — nothing to poll.")
         return {"processed": 0, "failed": 0, "total_listings": 0,

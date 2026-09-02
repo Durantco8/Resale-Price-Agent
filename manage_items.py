@@ -7,21 +7,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from resale_price_agent.db import (
-    add_tracked_item,
     get_all_tracked_items,
     get_engine,
+    get_or_create_tracked_item,
     get_tracked_item,
-    remove_tracked_item,
-    set_tracked_item_active,
+    set_tracked_item_status,
 )
 
 
 def cmd_add(args, engine):
-    item_id = add_tracked_item(
-        engine, args.query, target_price=args.target_price
-    )
-    price_note = f" (target: ${args.target_price:.2f})" if args.target_price else ""
-    print(f"Added item #{item_id}: \"{args.query}\"{price_note}")
+    item, created = get_or_create_tracked_item(engine, args.query)
+    if created:
+        print(f"Added item #{item['id']}: \"{item['display_name']}\"")
+    else:
+        print(f"Already tracking item #{item['id']}: \"{item['display_name']}\"")
 
 
 def cmd_list(args, engine):
@@ -30,34 +29,20 @@ def cmd_list(args, engine):
         print("No tracked items.")
         return
     for item in items:
-        status = "active" if item["active"] else "paused"
-        target = f"  target=${item['target_price']:.2f}" if item["target_price"] else ""
-        date = str(item["date_added"])[:10]
-        print(f"  #{item['id']}  [{status}]  \"{item['search_query']}\"{target}  (added {date})")
+        seeded = " [seeded]" if item["is_seeded"] else ""
+        date = str(item["created_at"])[:10]
+        print(
+            f"  #{item['id']}  [{item['status']}]  "
+            f"\"{item['display_name']}\"{seeded}  (added {date})"
+        )
 
 
-def cmd_pause(args, engine):
+def cmd_status(args, engine):
     if not get_tracked_item(engine, args.id):
         print(f"Item #{args.id} not found.")
         sys.exit(1)
-    set_tracked_item_active(engine, args.id, False)
-    print(f"Paused item #{args.id}.")
-
-
-def cmd_resume(args, engine):
-    if not get_tracked_item(engine, args.id):
-        print(f"Item #{args.id} not found.")
-        sys.exit(1)
-    set_tracked_item_active(engine, args.id, True)
-    print(f"Resumed item #{args.id}.")
-
-
-def cmd_remove(args, engine):
-    if not get_tracked_item(engine, args.id):
-        print(f"Item #{args.id} not found.")
-        sys.exit(1)
-    remove_tracked_item(engine, args.id)
-    print(f"Removed item #{args.id}.")
+    set_tracked_item_status(engine, args.id, args.status)
+    print(f"Set item #{args.id} status to '{args.status}'.")
 
 
 def build_parser():
@@ -68,20 +53,13 @@ def build_parser():
 
     add_p = sub.add_parser("add", help="Add a new item to track")
     add_p.add_argument("query", help="eBay search query")
-    add_p.add_argument(
-        "--target-price", type=float, default=None, help="Optional target price"
-    )
 
     sub.add_parser("list", help="List all tracked items")
 
-    pause_p = sub.add_parser("pause", help="Pause tracking for an item")
-    pause_p.add_argument("id", type=int, help="Item ID to pause")
-
-    resume_p = sub.add_parser("resume", help="Resume tracking for an item")
-    resume_p.add_argument("id", type=int, help="Item ID to resume")
-
-    remove_p = sub.add_parser("remove", help="Remove a tracked item")
-    remove_p.add_argument("id", type=int, help="Item ID to remove")
+    status_p = sub.add_parser("status", help="Set item status")
+    status_p.add_argument("id", type=int, help="Item ID")
+    status_p.add_argument("status", choices=["collecting", "active"],
+                          help="New status")
 
     return parser
 
@@ -89,9 +67,7 @@ def build_parser():
 COMMANDS = {
     "add": cmd_add,
     "list": cmd_list,
-    "pause": cmd_pause,
-    "resume": cmd_resume,
-    "remove": cmd_remove,
+    "status": cmd_status,
 }
 
 

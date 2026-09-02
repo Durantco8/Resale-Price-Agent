@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from resale_price_agent.db import (
-    get_recent_alerts,
+    get_recent_alerts_decisions,
     get_snapshots_for_item,
     insert_decision,
 )
@@ -35,7 +35,7 @@ DAILY_ALERT_CAP = 10
 def _get_already_alerted_ids(engine, tracked_item_id: int, window_hours: int) -> set[str]:
     """Return eBay listing IDs that already triggered an alert within *window_hours*."""
     since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
-    recent = get_recent_alerts(engine, tracked_item_id, since=since)
+    recent = get_recent_alerts_decisions(engine, tracked_item_id, since=since)
     seen: set[str] = set()
     for dec in recent:
         raw = dec.get("computed_signals") or "{}"
@@ -54,7 +54,7 @@ def _count_today_alerts(engine, tracked_item_id: int) -> int:
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0,
     )
-    return len(get_recent_alerts(engine, tracked_item_id, since=today_start))
+    return len(get_recent_alerts_decisions(engine, tracked_item_id, since=today_start))
 
 
 def check_price_drops(

@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from resale_price_agent.db import (
-    add_tracked_item,
+    get_or_create_tracked_item,
     get_decisions_for_item,
     insert_snapshots,
     metadata,
@@ -49,7 +49,7 @@ def _seed_history(engine, item_id, prices, start_hours_ago=48):
 
 class TestTargetPrice:
     def test_below_target_fires(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         new = [_snap("new-1", 189.99)]
 
         alerts = check_price_drops(engine, item_id, new, target_price=200.0)
@@ -60,14 +60,14 @@ class TestTargetPrice:
         assert "below target price" in decisions[0]["reasoning"]
 
     def test_at_target_fires(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         new = [_snap("new-1", 200.0)]
 
         alerts = check_price_drops(engine, item_id, new, target_price=200.0)
         assert len(alerts) == 1
 
     def test_above_target_no_alert(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         new = [_snap("new-1", 200.01)]
 
         alerts = check_price_drops(engine, item_id, new, target_price=200.0)
@@ -75,14 +75,14 @@ class TestTargetPrice:
 
     def test_target_works_without_history(self, engine):
         """Target price check should fire even with zero history (cold start)."""
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         new = [_snap("new-1", 150.0)]
 
         alerts = check_price_drops(engine, item_id, new, target_price=200.0)
         assert len(alerts) == 1
 
     def test_no_target_set(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         new = [_snap("new-1", 100.0)]
 
         alerts = check_price_drops(engine, item_id, new, target_price=None)
@@ -95,7 +95,7 @@ class TestTargetPrice:
 
 class TestRollingAverage:
     def test_below_threshold_fires(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         # History: 10 snapshots averaging $220
         _seed_history(engine, item_id, [220.0] * 10)
         # New listing at $190 = ~13.6% below average (> 12% default)
@@ -113,7 +113,7 @@ class TestRollingAverage:
 
     def test_just_above_threshold_no_alert(self, engine):
         """11.9% below average should NOT fire at the 12% threshold."""
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [200.0] * 10)
         # 200 * 0.88 = 176.  A price of 176.50 is ~11.75% below — no alert.
         new = [_snap("new-1", 176.50)]
@@ -123,7 +123,7 @@ class TestRollingAverage:
 
     def test_just_below_threshold_fires(self, engine):
         """12.5% below average SHOULD fire at the 12% threshold."""
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [200.0] * 10)
         # 200 * 0.875 = 175.  Price of 175 is exactly 12.5% below.
         new = [_snap("new-1", 175.0)]
@@ -133,7 +133,7 @@ class TestRollingAverage:
 
     def test_exactly_at_threshold_fires(self, engine):
         """Exactly 12% below should fire (>= threshold)."""
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [200.0] * 10)
         # 200 * 0.88 = 176.0 exactly
         new = [_snap("new-1", 176.0)]
@@ -142,7 +142,7 @@ class TestRollingAverage:
         assert len(alerts) == 1
 
     def test_custom_threshold(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [200.0] * 10)
         # 5% threshold: $190 is exactly 5% below
         new = [_snap("new-1", 190.0)]
@@ -151,7 +151,7 @@ class TestRollingAverage:
         assert len(alerts) == 1
 
     def test_price_above_average_no_alert(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [200.0] * 10)
         new = [_snap("new-1", 210.0)]
 
@@ -166,7 +166,7 @@ class TestRollingAverage:
 class TestColdStart:
     def test_too_few_snapshots_skips_avg_check(self, engine):
         """With < min_history snapshots, rolling avg check is skipped."""
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         # Only 3 snapshots (default min is 5)
         _seed_history(engine, item_id, [220.0, 220.0, 220.0])
         # This price would be way below average, but avg check should be skipped
@@ -176,7 +176,7 @@ class TestColdStart:
         assert len(alerts) == 0
 
     def test_zero_history(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         new = [_snap("new-1", 100.0)]
 
         alerts = check_price_drops(engine, item_id, new, target_price=None)
@@ -184,7 +184,7 @@ class TestColdStart:
 
     def test_cold_start_target_still_works(self, engine):
         """Even with no history, target price alerts should fire."""
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         new = [_snap("new-1", 150.0)]
 
         alerts = check_price_drops(engine, item_id, new, target_price=180.0)
@@ -197,7 +197,7 @@ class TestColdStart:
 
 class TestMultipleListings:
     def test_multiple_new_listings(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [220.0] * 10)
         new = [
             _snap("new-1", 190.0),  # 13.6% below — fires
@@ -210,7 +210,7 @@ class TestMultipleListings:
 
     def test_both_target_and_avg_fire(self, engine):
         """A listing can trigger both checks at once."""
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [220.0] * 10)
         new = [_snap("new-1", 180.0)]
 
@@ -224,7 +224,7 @@ class TestMultipleListings:
         assert "average" in reasoning
 
     def test_empty_new_snapshots(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         alerts = check_price_drops(engine, item_id, [])
         assert alerts == []
 
@@ -235,7 +235,7 @@ class TestMultipleListings:
 
 class TestSignals:
     def test_signals_contain_expected_keys(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         _seed_history(engine, item_id, [220.0] * 10)
         new = [_snap("new-1", 190.0, title="Jordan 4 Military Black")]
 
@@ -258,7 +258,7 @@ class TestSignals:
 class TestThrottlingDedup:
     def test_same_listing_twice_only_one_alert(self, engine):
         """Same eBay listing ID across two poll cycles → only the first fires."""
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         snap = [_snap("listing-A", 180.0)]
 
         first = check_price_drops(engine, item_id, snap, target_price=200.0)
@@ -268,7 +268,7 @@ class TestThrottlingDedup:
         assert len(second) == 0
 
     def test_different_listings_both_alert(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         a1 = check_price_drops(
             engine, item_id, [_snap("listing-A", 180.0)], target_price=200.0,
@@ -282,7 +282,7 @@ class TestThrottlingDedup:
 
     def test_same_listing_in_one_batch_deduped(self, engine):
         """Two snapshots with the same eBay ID in one call → one alert."""
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         snaps = [
             _snap("listing-A", 180.0),
             _snap("listing-A", 179.0),
@@ -293,7 +293,7 @@ class TestThrottlingDedup:
 
     def test_dedup_window_expiry_allows_realert(self, engine):
         """After the dedup window passes, the same listing can re-alert."""
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         snap = [_snap("listing-A", 180.0)]
 
         first = check_price_drops(
@@ -319,7 +319,7 @@ class TestThrottlingDedup:
 
 class TestThrottlingDailyCap:
     def test_cap_stops_further_alerts(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         snaps = [_snap(f"listing-{i}", 180.0) for i in range(5)]
 
         alerts = check_price_drops(
@@ -330,7 +330,7 @@ class TestThrottlingDailyCap:
 
     def test_cap_counts_existing_alerts(self, engine):
         """Cap accounts for alerts already fired earlier today."""
-        item_id = add_tracked_item(engine, "Jordan 4", target_price=200.0)
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         # Fire 2 alerts first
         first = check_price_drops(

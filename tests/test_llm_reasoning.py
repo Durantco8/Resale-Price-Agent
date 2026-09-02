@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from resale_price_agent.db import (
-    add_tracked_item,
+    get_or_create_tracked_item,
     get_decisions_for_item,
     metadata,
 )
@@ -107,7 +107,7 @@ def _insufficient_signals():
 
 class TestInsufficientData:
     def test_skips_llm_call(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         fake = FakeClient()
 
         result = get_llm_decision(
@@ -120,7 +120,7 @@ class TestInsufficientData:
         assert fake.calls == []  # LLM was never called
 
     def test_no_decision_stored(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         get_llm_decision(
             engine, item_id, _insufficient_signals(), "no listings",
@@ -136,7 +136,7 @@ class TestInsufficientData:
 
 class TestValidResponse:
     def test_buy_now(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         fake = FakeClient(response=_json_response(
             "buy_now", 0.9, "Prices dropping, high supply."
         ))
@@ -152,7 +152,7 @@ class TestValidResponse:
         assert result.skipped is False
 
     def test_wait(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "3 listings",
@@ -163,7 +163,7 @@ class TestValidResponse:
         assert result.confidence == 0.6
 
     def test_skip(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "1 listing",
@@ -173,7 +173,7 @@ class TestValidResponse:
         assert result.action == "skip"
 
     def test_decision_stored_in_db(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -191,7 +191,7 @@ class TestValidResponse:
         assert signals["avg_price"] == 200.0
 
     def test_signals_forwarded_to_api(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
         fake = FakeClient(response=_json_response())
 
         get_llm_decision(
@@ -213,7 +213,7 @@ class TestValidResponse:
 
 class TestMalformedResponse:
     def test_invalid_action(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -225,7 +225,7 @@ class TestMalformedResponse:
         assert get_decisions_for_item(engine, item_id) == []
 
     def test_confidence_out_of_range(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -236,7 +236,7 @@ class TestMalformedResponse:
         assert result.skip_reason == "parse_error"
 
     def test_negative_confidence(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -246,7 +246,7 @@ class TestMalformedResponse:
         assert result.skipped is True
 
     def test_empty_reasoning(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -256,7 +256,7 @@ class TestMalformedResponse:
         assert result.skipped is True
 
     def test_not_json(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -267,7 +267,7 @@ class TestMalformedResponse:
         assert result.skip_reason == "parse_error"
 
     def test_empty_response_text(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -278,7 +278,7 @@ class TestMalformedResponse:
         assert result.skip_reason == "parse_error"
 
     def test_none_response_text(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -289,7 +289,7 @@ class TestMalformedResponse:
         assert result.skip_reason == "parse_error"
 
     def test_missing_fields(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -300,7 +300,7 @@ class TestMalformedResponse:
 
     def test_response_without_text_attr(self, engine):
         """Response object missing .text entirely."""
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -317,7 +317,7 @@ class TestMalformedResponse:
 
 class TestAPIErrors:
     def test_api_timeout(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -329,7 +329,7 @@ class TestAPIErrors:
         assert get_decisions_for_item(engine, item_id) == []
 
     def test_api_connection_error(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
@@ -340,7 +340,7 @@ class TestAPIErrors:
         assert result.skip_reason == "api_error"
 
     def test_api_rate_limit(self, engine):
-        item_id = add_tracked_item(engine, "Jordan 4")
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
 
         result = get_llm_decision(
             engine, item_id, _sufficient_signals(), "summary",
