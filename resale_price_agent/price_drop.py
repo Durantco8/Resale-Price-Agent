@@ -29,7 +29,7 @@ DEDUP_WINDOW_HOURS = 24
 
 # Maximum alerts per tracked item per calendar day (UTC).  Prevents inbox
 # flooding when many listings qualify at once.
-DAILY_ALERT_CAP = 10
+DAILY_ALERT_CAP = 3
 
 
 def _get_already_alerted_ids(engine, tracked_item_id: int, window_hours: int) -> set[str]:
@@ -81,6 +81,19 @@ def check_price_drops(
     if not new_snapshots:
         return []
 
+    # --- Cold-start guard ---
+    # On the very first poll there is no prior history, so the rolling-
+    # average check is meaningless.  Target-price alerts still fire —
+    # a listing at or below the user's target is actionable regardless
+    # of history.
+    all_prior = get_snapshots_for_item(engine, tracked_item_id)
+    is_first_poll = not all_prior
+    if is_first_poll:
+        log.info(
+            "  Tracked item #%d: first poll — skipping rolling-avg check.",
+            tracked_item_id,
+        )
+
     alerts: list[int] = []
 
     # --- Throttle state ---
@@ -88,13 +101,14 @@ def check_price_drops(
     today_count = _count_today_alerts(engine, tracked_item_id)
 
     # --- Compute rolling average from history (if enough data) ---
-    since = datetime.now(timezone.utc) - timedelta(days=window_days)
-    history = get_snapshots_for_item(engine, tracked_item_id, since=since)
-    prices = [s["price"] for s in history]
-
     rolling_avg = None
-    if len(prices) >= min_history:
-        rolling_avg = sum(prices) / len(prices)
+    if not is_first_poll:
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        history = get_snapshots_for_item(engine, tracked_item_id, since=since)
+        prices = [s["price"] for s in history]
+
+        if len(prices) >= min_history:
+            rolling_avg = sum(prices) / len(prices)
 
     for snap in new_snapshots:
         # --- Daily cap check ---
