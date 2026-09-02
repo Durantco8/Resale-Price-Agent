@@ -1,7 +1,8 @@
-"""Tests for the shared polling loop — all external calls faked."""
+"""Tests for the unified polling loop — all external calls faked."""
 
 import json
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -281,3 +282,113 @@ class TestSnapshotAccumulation:
 
         snaps = get_snapshots_for_item(engine, item["id"])
         assert len(snaps) == 6
+
+
+# ---------------------------------------------------------------------------
+# Price-drop detection runs for all items
+# ---------------------------------------------------------------------------
+
+class TestPriceDropDetection:
+    def test_price_drop_runs_for_all_items(self, engine):
+        get_or_create_tracked_item(engine, "Item A", owner="me")
+        get_or_create_tracked_item(engine, "Item B")  # public
+
+        # Seed enough history so rolling avg exists
+        items = get_all_tracked_items(engine)
+        for item in items:
+            _seed_history(engine, item["id"], [200.0] * 6)
+
+        # Very cheap listing triggers price-drop detection
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        result = poll_all_items(engine, ebay, _MockLLM())
+
+        # Both items processed, decisions stored for both
+        assert result["processed"] == 2
+        for item in items:
+            decisions = get_decisions_for_item(engine, item["id"])
+            assert any(d["event_type"] == "price_drop_alert" for d in decisions)
+
+
+# ---------------------------------------------------------------------------
+# Owner-gated personal notifications
+# ---------------------------------------------------------------------------
+
+class TestOwnerNotifications:
+    def test_owner_item_triggers_personal_notify(self, engine):
+        get_or_create_tracked_item(engine, "Jordan 4", owner="me")
+        _seed_history(engine, 1, [200.0] * 6)
+
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        llm = _MockLLM(action="buy_now", confidence=0.9, reasoning="Great deal.")
+        mock_notify_fn = MagicMock()
+
+        result = poll_all_items(
+            engine, ebay, llm,
+            notify_send_fn=mock_notify_fn,
+            notify_recipient="owner@example.com",
+        )
+
+        assert result["notifications"] > 0
+        assert mock_notify_fn.call_count > 0
+        # Every personal notification goes to the owner's email
+        for call in mock_notify_fn.call_args_list:
+            assert call[0][0] == "owner@example.com"
+
+    def test_public_item_never_triggers_personal_notify(self, engine):
+        """Inverse regression: public items must never call notifier.notify(),
+        regardless of price drops, buy_now decisions, or any other condition."""
+        get_or_create_tracked_item(engine, "Nintendo Switch OLED")  # owner=NULL
+        _seed_history(engine, 1, [200.0] * 6)
+
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        llm = _MockLLM(action="buy_now", confidence=0.95, reasoning="Buy immediately.")
+        mock_notify_fn = MagicMock()
+
+        result = poll_all_items(
+            engine, ebay, llm,
+            notify_send_fn=mock_notify_fn,
+            notify_recipient="owner@example.com",
+        )
+
+        assert result["notifications"] == 0
+        mock_notify_fn.assert_not_called()
+        # Confirm price drops WERE detected (the detection ran, just no notify)
+        decisions = get_decisions_for_item(engine, 1)
+        assert any(d["event_type"] == "price_drop_alert" for d in decisions)
+
+    def test_public_alerts_fire_for_all_items(self, engine):
+        from resale_price_agent.db import create_alert
+        get_or_create_tracked_item(engine, "Jordan 4", owner="me")
+        get_or_create_tracked_item(engine, "Public Item")  # no owner
+
+        # Create public subscriptions for both items
+        create_alert(engine, "subscriber@test.com", 1, "price_below:9999")
+        create_alert(engine, "subscriber@test.com", 2, "price_below:9999")
+
+        ebay = _MockEbay([_listing(item_id="v1|1|0", price=50.0)])
+        llm = _MockLLM()
+        mock_send = MagicMock()
+
+        result = poll_all_items(engine, ebay, llm, send_fn=mock_send)
+
+        assert result["alerts_sent"] == 2
+        # Both calls go to the subscriber, not to NOTIFY_TO
+        for call in mock_send.call_args_list:
+            assert call[0][0] == "subscriber@test.com"
+
+    def test_seeded_item_never_triggers_personal_notify(self, engine):
+        seed_tracked_item(engine, "PS5 Console")  # seeded, no owner
+        _seed_history(engine, 1, [200.0] * 6)
+
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        llm = _MockLLM(action="buy_now", confidence=0.9, reasoning="Deal.")
+        mock_notify_fn = MagicMock()
+
+        result = poll_all_items(
+            engine, ebay, llm,
+            notify_send_fn=mock_notify_fn,
+            notify_recipient="owner@example.com",
+        )
+
+        assert result["notifications"] == 0
+        mock_notify_fn.assert_not_called()
