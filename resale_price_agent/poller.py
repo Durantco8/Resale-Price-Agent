@@ -11,7 +11,6 @@ One item's failure never blocks the others.
 import json
 import logging
 
-from resale_price_agent.alerts import process_alerts
 from resale_price_agent.db import (
     get_all_tracked_items,
     get_snapshots_for_item,
@@ -76,13 +75,9 @@ def poll_all_items(
     engine,
     ebay_client,
     llm_client=None,
-    send_fn=None,
     status_threshold: int = STATUS_THRESHOLD,
 ) -> dict:
     """Poll every tracked item: fetch listings, store, compute, decide, alert.
-
-    *send_fn* is an injectable email sender ``(to, subject, body) -> None``.
-    Pass ``None`` to skip alert emails entirely.
 
     Returns a summary dict for observability/logging.
     """
@@ -99,7 +94,6 @@ def poll_all_items(
     processed = 0
     failed = 0
     total_snapshots = 0
-    total_alerts_sent = 0
 
     for item in items:
         item_id = item["id"]
@@ -136,25 +130,16 @@ def poll_all_items(
                 engine, item_id, signals, listing_summary, **llm_kwargs,
             )
 
-            # --- Alert notifications ---
-            if send_fn is not None:
-                sent = process_alerts(
-                    engine, item, snapshot_dicts, llm_result, send_fn,
-                )
-                total_alerts_sent += sent
-
         except Exception:
             failed += 1
             log.exception("  #%d \"%s\" \u2014 FAILED", item_id, query)
 
     log.info(
-        "Poll complete: %d processed, %d failed, %d snapshot(s), "
-        "%d alert(s) sent.",
-        processed, failed, total_snapshots, total_alerts_sent,
+        "Poll complete: %d processed, %d failed, %d snapshot(s).",
+        processed, failed, total_snapshots,
     )
     return {
         "processed": processed,
         "failed": failed,
         "total_snapshots": total_snapshots,
-        "alerts_sent": total_alerts_sent,
     }
