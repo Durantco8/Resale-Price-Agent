@@ -29,6 +29,13 @@ log = logging.getLogger(__name__)
 # this the LLM layer skips anyway since trends can't be computed.
 STATUS_THRESHOLD = 5
 
+# Recommended polling interval for production use.  Each poll cycle makes
+# one eBay Browse API call per tracked item.  The daily API limit is 5,000
+# calls.  At 75 items and a 3-hour interval:
+#   8 cycles/day × 75 items = 600 calls/day (12% of daily budget).
+# Headroom allows for user-initiated searches and future item growth.
+POLL_INTERVAL_HOURS = 3
+
 
 def snapshot_to_dict(snap: ListingSnapshot) -> dict:
     """Convert a ListingSnapshot dataclass to a dict matching the DB schema."""
