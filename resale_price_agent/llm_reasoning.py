@@ -102,7 +102,10 @@ def get_llm_decision(
                 system_instruction=SYSTEM_PROMPT,
                 response_mime_type="application/json",
                 response_schema=DECISION_SCHEMA,
-                max_output_tokens=512,
+                max_output_tokens=1024,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=True,
+                ),
             ),
         )
     except Exception:
