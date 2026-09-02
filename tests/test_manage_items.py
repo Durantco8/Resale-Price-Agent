@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from manage_items import main
 from resale_price_agent.db import (
     get_all_tracked_items,
+    get_or_create_tracked_item,
     get_tracked_item,
     metadata,
 )
@@ -16,6 +17,11 @@ def engine():
     eng = create_engine("sqlite:///:memory:", echo=False)
     metadata.create_all(eng)
     return eng
+
+
+@pytest.fixture(autouse=True)
+def set_owner(monkeypatch):
+    monkeypatch.setenv("POLLER_OWNER", "testuser")
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +38,7 @@ class TestAdd:
         items = get_all_tracked_items(engine)
         assert len(items) == 1
         assert items[0]["search_query"] == "Jordan 4 Military Black size 10"
+        assert items[0]["owner"] == "testuser"
 
     def test_add_existing_shows_already_tracking(self, engine, capsys):
         main(["add", "Jordan 4"], engine=engine)
@@ -48,6 +55,32 @@ class TestAdd:
 
         items = get_all_tracked_items(engine)
         assert len(items) == 2
+
+    def test_add_claims_existing_public_item(self, engine, capsys):
+        get_or_create_tracked_item(engine, "Jordan 4")  # public search, no owner
+        capsys.readouterr()
+
+        main(["add", "Jordan 4"], engine=engine)
+        out = capsys.readouterr().out
+
+        assert "Claiming existing item" in out
+        assert "was public-only" in out
+        items = get_all_tracked_items(engine)
+        assert items[0]["owner"] == "testuser"
+
+    def test_add_refuses_without_poller_owner(self, engine, monkeypatch, capsys):
+        monkeypatch.delenv("POLLER_OWNER", raising=False)
+        with pytest.raises(SystemExit, match="1"):
+            main(["add", "Jordan 4"], engine=engine)
+        err = capsys.readouterr().err
+        assert "POLLER_OWNER is not set" in err
+
+    def test_add_refuses_with_empty_poller_owner(self, engine, monkeypatch, capsys):
+        monkeypatch.setenv("POLLER_OWNER", "  ")
+        with pytest.raises(SystemExit, match="1"):
+            main(["add", "Jordan 4"], engine=engine)
+        err = capsys.readouterr().err
+        assert "POLLER_OWNER is not set" in err
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +105,7 @@ class TestList:
         assert "[collecting]" in out
         assert "Jordan 4 size 10" in out
         assert "#2" in out
+        assert "owner=testuser" in out
 
 
 # ---------------------------------------------------------------------------

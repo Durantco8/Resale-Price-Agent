@@ -1,6 +1,7 @@
 """CLI for managing tracked items in the resale price agent watchlist."""
 
 import argparse
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -15,12 +16,34 @@ from resale_price_agent.db import (
 )
 
 
+def _get_owner():
+    return os.environ.get("POLLER_OWNER", "").strip() or None
+
+
 def cmd_add(args, engine):
-    item, created, _ = get_or_create_tracked_item(engine, args.query)
+    owner = _get_owner()
+    if owner is None:
+        print(
+            "Error: POLLER_OWNER is not set. Set it in .env to mark "
+            "items as personal.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    item, created, claimed = get_or_create_tracked_item(
+        engine, args.query, owner=owner,
+    )
     if created:
         print(f"Added item #{item['id']}: \"{item['display_name']}\"")
+    elif claimed:
+        print(
+            f"Claiming existing item #{item['id']} as personal "
+            f"(was public-only): \"{item['display_name']}\""
+        )
     else:
         print(f"Already tracking item #{item['id']}: \"{item['display_name']}\"")
+
+
 
 
 def cmd_list(args, engine):
@@ -29,11 +52,16 @@ def cmd_list(args, engine):
         print("No tracked items.")
         return
     for item in items:
-        seeded = " [seeded]" if item["is_seeded"] else ""
+        tags = []
+        if item["is_seeded"]:
+            tags.append("seeded")
+        if item.get("owner"):
+            tags.append(f"owner={item['owner']}")
+        tag_str = f"  [{', '.join(tags)}]" if tags else ""
         date = str(item["created_at"])[:10]
         print(
             f"  #{item['id']}  [{item['status']}]  "
-            f"\"{item['display_name']}\"{seeded}  (added {date})"
+            f"\"{item['display_name']}\"{tag_str}  (added {date})"
         )
 
 
