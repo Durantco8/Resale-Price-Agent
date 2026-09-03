@@ -244,6 +244,7 @@ The reason for the change is scalability and reliability: the catalogue already 
 
 ### Phase 1 completed
 
+- **Committed and pushed:** `55f164b` — `Add batch-aware longitudinal market signals`. Local `main` and `origin/main` were confirmed synchronized after the push.
 - Added an explicit UUID `poll_batch_id` to snapshots. Every `insert_snapshots()` call creates one batch unless a caller supplies a batch ID explicitly.
 - Added a small additive schema migration. Existing rows are backfilled deterministically by tracked item + their formerly shared snapshot timestamp, preserving the legacy batch grouping without deleting or rewriting snapshot content.
 - Added an `(tracked_item_id, poll_batch_id)` index.
@@ -260,4 +261,28 @@ The reason for the change is scalability and reliability: the catalogue already 
 
 ### Recommended Phase 2
 
-Implement a pure, versioned deterministic recommendation module and idempotent `deterministic_recommendation` storage. Start with explicit evidence/confidence gates (especially poll-batch maturity), then table-driven `BUY` / `WAIT` / `SKIP` rules. Keep Gemini non-authoritative and keep notification routing unchanged until the deterministic results and API selection behavior are proven with tests.
+**Status: not implemented. No Phase 2 application-code changes have started.**
+
+The exact approved Phase 2 boundary is:
+
+- Implement a pure, versioned deterministic recommendation module with transparent, table-driven `BUY` / `WAIT` / `SKIP` rules.
+- Apply explicit evidence and confidence gates. A score alone must never create `BUY` without sufficient longitudinal evidence; insufficient or sparse history must safely produce low-confidence `WAIT`, not `SKIP`.
+- Store authoritative results as `deterministic_recommendation`, clearly separate from legacy `llm_reasoning` and `price_drop_alert` events.
+- Add the minimum additive decision provenance needed for auditability and idempotency (for example `decision_engine`, `ruleset_version`, and `source_poll_batch`). The same item/batch/ruleset must not create duplicates.
+- Add an explicit latest-deterministic-recommendation query so newer non-recommendation events cannot hide the current core recommendation.
+- Cover multi-batch `BUY` / `WAIT` / `SKIP`, insufficient-history `WAIT`, exact rule boundaries, idempotency/duplicate prevention, and latest-recommendation selection with tests.
+- Do **not** move email alerts or owner notifications to the deterministic engine yet.
+- Do **not** remove Gemini. It remains available for eventual optional `llm_analysis`, but it cannot control or override the deterministic action.
+- Do **not** reset the database or destructively alter production data.
+
+### Current cautions / unresolved context
+
+- The working SQLite database was deliberately not opened through the new migration during Phase 1. It still has 3,326 snapshots and will receive the additive `poll_batch_id` column/backfill automatically on its next `get_engine()` open; the migration was already validated against a temporary full copy.
+- Those 3,326 legacy rows represent only one real polling batch per tracked item. After backfill, existing items therefore remain longitudinally immature until additional polls occur, even when their row-count status is `active`.
+- The current `active` status threshold is still based on snapshot-row count rather than poll-batch maturity.
+- `tracked_items` still has no `target_price` column even though price-drop code can accept a target price; that path is not currently configurable from the live schema.
+- `/api/trending` currently asks for the latest decision of any event type. Phase 2's explicit latest deterministic query must prevent a newer `price_drop_alert` or legacy LLM event from masquerading as the current recommendation.
+- Current `buy_now` public alerts and owner notifications still depend on `LLMDecision`; notification migration and delivery deduplication are intentionally later work.
+- Separate known issues remain: residual item/accessory matching quality, sneaker counterfeit detection, SQLite-to-hosted-Postgres/Render deployment, and clickable chart points.
+
+**Exact next step when work resumes:** implement and test the pure deterministic rule/result model first, then add additive provenance/idempotent storage and the latest-deterministic-recommendation query. Integrate it into polling only after those unit/storage tests are green, without changing notification routing.
