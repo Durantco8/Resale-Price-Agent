@@ -15,29 +15,27 @@ Key eBay category IDs used:
   9355   — Cell Phones & Smartphones
   171485 — Tablets & eReaders
   112529 — Headphones
-  112529 — Headphones (also covers earbuds)
   148581 — Portable Speakers
   139971 — Video Game Consoles
   183068 — VR Headsets
   93427  — Athletic Shoes (Men)
   11450  — Men's Clothing (hoodies/tees/jackets)
   52137  — Hats
-  183446 — Down & Puffer Jackets
-  19161  — Wristwatches
-  31387  — Film Cameras
-  31388  — Digital Cameras
+  57988  — Coats, Jackets & Vests (Men)
+  31387  — Wristwatches
+  31388  — Digital Cameras (also GoPro)
   73839  — iPods & MP3 Players
-  48458  — Portable Audio (Walkmans etc.)
-  182964 — Action Cameras
-  183475 — Sealed Collectible Card Game Boxes & Packs
+  38230  — Portable Cassette Players
+  183454 — CCG Sealed Packs (Pokemon, MTG, Yu-Gi-Oh)
+  212    — Sports Trading Cards (Topps, Panini)
   19006  — LEGO Complete Sets & Packs
   20614  — Vacuums
-  38221  — Tumblers
+  20321  — Water Bottles
   64136  — Blenders (Countertop)
   25526  — Cookware (Dutch ovens)
-  42231  — Coolers
+  159042 — Camping Ice Boxes & Coolers
   38261  — Stand Mixers
-  177765 — Hair Styling Tools
+  11658  — Hair Dryers
 """
 
 from resale_price_agent.db import seed_tracked_item
@@ -88,15 +86,16 @@ SEED_ITEMS = [
     {"query": "Sennheiser HD 600", "display_name": "Sennheiser HD 600", "category": "audio", "ebay_category_id": "112529"},
 
     # ── Trading Cards ─────────────────────────────────────────────────
-    # 183475 = Sealed Collectible Card Game Boxes & Packs
-    {"query": "Pokemon Base Set Booster Pack", "display_name": "Pokémon Base Set Booster Pack", "category": "trading_cards", "ebay_category_id": "183475"},
-    {"query": "Pokemon 151 Elite Trainer Box", "display_name": "Pokémon 151 Elite Trainer Box", "category": "trading_cards", "ebay_category_id": "183475"},
-    {"query": "Topps Chrome Baseball Hobby Box 2024", "display_name": "Topps Chrome Baseball Hobby Box 2024", "category": "trading_cards", "ebay_category_id": "183475"},
-    {"query": "Panini Prizm Basketball Hobby Box", "display_name": "Panini Prizm Basketball Hobby Box", "category": "trading_cards", "ebay_category_id": "183475"},
-    {"query": "Magic The Gathering Modern Horizons 3 Collector Box", "display_name": "MTG Modern Horizons 3 Collector Box", "category": "trading_cards", "ebay_category_id": "183475"},
-    {"query": "Pokemon Scarlet Violet Booster Box", "display_name": "Pokémon Scarlet & Violet Booster Box", "category": "trading_cards", "ebay_category_id": "183475"},
-    {"query": "Yu-Gi-Oh 25th Anniversary Rarity Collection Box", "display_name": "Yu-Gi-Oh! 25th Anniversary Rarity Collection", "category": "trading_cards", "ebay_category_id": "183475"},
-    {"query": "Topps UEFA Champions League Chrome Hobby Box", "display_name": "Topps UEFA Champions League Chrome Hobby", "category": "trading_cards", "ebay_category_id": "183475"},
+    # 183454 = CCG Sealed Packs (Pokemon, MTG, Yu-Gi-Oh)
+    # 212    = Sports Trading Cards (Topps, Panini)
+    {"query": "Pokemon Base Set Booster Pack", "display_name": "Pokémon Base Set Booster Pack", "category": "trading_cards", "ebay_category_id": "183454"},
+    {"query": "Pokemon 151 Elite Trainer Box", "display_name": "Pokémon 151 Elite Trainer Box", "category": "trading_cards", "ebay_category_id": "183454"},
+    {"query": "Topps Chrome Baseball Hobby Box 2024", "display_name": "Topps Chrome Baseball Hobby Box 2024", "category": "trading_cards", "ebay_category_id": "212"},
+    {"query": "Panini Prizm Basketball Hobby Box", "display_name": "Panini Prizm Basketball Hobby Box", "category": "trading_cards", "ebay_category_id": "212"},
+    {"query": "Magic The Gathering Modern Horizons 3 Collector Box", "display_name": "MTG Modern Horizons 3 Collector Box", "category": "trading_cards", "ebay_category_id": "183454"},
+    {"query": "Pokemon Scarlet Violet Booster Box", "display_name": "Pokémon Scarlet & Violet Booster Box", "category": "trading_cards", "ebay_category_id": "183454"},
+    {"query": "Yu-Gi-Oh 25th Anniversary Rarity Collection Box", "display_name": "Yu-Gi-Oh! 25th Anniversary Rarity Collection", "category": "trading_cards", "ebay_category_id": "183454"},
+    {"query": "Topps UEFA Champions League Chrome Hobby Box", "display_name": "Topps UEFA Champions League Chrome Hobby", "category": "trading_cards", "ebay_category_id": "212"},
 
     # ── LEGO ──────────────────────────────────────────────────────────
     # 19006 = LEGO Complete Sets & Packs
@@ -125,28 +124,28 @@ SEED_ITEMS = [
     {"query": "Canon AE-1 Program", "display_name": "Canon AE-1 Program", "category": "cameras", "ebay_category_id": "31388"},
     {"query": "Fujifilm X100VI", "display_name": "Fujifilm X100VI", "category": "cameras", "ebay_category_id": "31388"},
     {"query": "Apple iPod Classic 160GB", "display_name": "Apple iPod Classic 160GB", "category": "cameras", "ebay_category_id": "73839"},
-    {"query": "Sony Walkman WM-F2015", "display_name": "Sony Walkman WM-F2015", "category": "cameras", "ebay_category_id": "48458"},
+    {"query": "Sony Walkman WM-F2015", "display_name": "Sony Walkman WM-F2015", "category": "cameras", "ebay_category_id": "38230"},
     {"query": "Polaroid SX-70 Camera", "display_name": "Polaroid SX-70", "category": "cameras", "ebay_category_id": "31388"},
-    {"query": "GoPro Hero 12 Black", "display_name": "GoPro Hero 12 Black", "category": "cameras", "ebay_category_id": "182964"},
+    {"query": "GoPro Hero 12 Black", "display_name": "GoPro Hero 12 Black", "category": "cameras", "ebay_category_id": "31388"},
 
     # ── Streetwear & Fashion ──────────────────────────────────────────
     # 11450 = Men's Clothing, 52137 = Hats, 183446 = Down & Puffer Jackets
     {"query": "Supreme Box Logo Hoodie", "display_name": "Supreme Box Logo Hoodie", "category": "streetwear", "ebay_category_id": "11450"},
     {"query": "Fear of God Essentials Hoodie", "display_name": "Fear of God Essentials Hoodie", "category": "streetwear", "ebay_category_id": "11450"},
     {"query": "Stussy Basic Logo Tee", "display_name": "Stussy Basic Logo Tee", "category": "streetwear", "ebay_category_id": "11450"},
-    {"query": "The North Face Nuptse 1996", "display_name": "The North Face Nuptse 1996", "category": "streetwear", "ebay_category_id": "183446"},
+    {"query": "The North Face Nuptse 1996", "display_name": "The North Face Nuptse 1996", "category": "streetwear", "ebay_category_id": "57988"},
     {"query": "Carhartt WIP Active Jacket", "display_name": "Carhartt WIP Active Jacket", "category": "streetwear", "ebay_category_id": "11450"},
     {"query": "Vintage Grateful Dead T-Shirt", "display_name": "Vintage Grateful Dead Tee", "category": "streetwear", "ebay_category_id": "11450"},
     {"query": "Chrome Hearts Trucker Hat", "display_name": "Chrome Hearts Trucker Hat", "category": "streetwear", "ebay_category_id": "52137"},
 
     # ── Home & Outdoor ────────────────────────────────────────────────
     {"query": "Dyson V15 Detect Vacuum", "display_name": "Dyson V15 Detect", "category": "home", "ebay_category_id": "20614"},
-    {"query": "Stanley Quencher H2.0 Tumbler 40oz", "display_name": "Stanley Quencher H2.0 40oz", "category": "home", "ebay_category_id": "38221"},
+    {"query": "Stanley Quencher H2.0 Tumbler 40oz", "display_name": "Stanley Quencher H2.0 40oz", "category": "home", "ebay_category_id": "20321"},
     {"query": "Vitamix A3500 Blender", "display_name": "Vitamix A3500 Blender", "category": "home", "ebay_category_id": "64136"},
     {"query": "Le Creuset Dutch Oven 5.5 Qt", "display_name": "Le Creuset Dutch Oven 5.5 Qt", "category": "home", "ebay_category_id": "25526"},
-    {"query": "YETI Tundra 45 Cooler", "display_name": "YETI Tundra 45 Cooler", "category": "home", "ebay_category_id": "42231"},
+    {"query": "YETI Tundra 45 Cooler", "display_name": "YETI Tundra 45 Cooler", "category": "home", "ebay_category_id": "159042"},
     {"query": "KitchenAid Artisan Stand Mixer", "display_name": "KitchenAid Artisan Stand Mixer", "category": "home", "ebay_category_id": "38261"},
-    {"query": "Dyson Airwrap Complete", "display_name": "Dyson Airwrap Complete", "category": "home", "ebay_category_id": "177765"},
+    {"query": "Dyson Airwrap Complete", "display_name": "Dyson Airwrap Complete", "category": "home", "ebay_category_id": "11658"},
 ]
 
 CATEGORIES = sorted({item["category"] for item in SEED_ITEMS})
