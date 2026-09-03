@@ -11,6 +11,7 @@ One item's failure never blocks the others.
 import json
 import logging
 import statistics
+import uuid
 
 from resale_price_agent.alerts import process_alerts
 from resale_price_agent.db import (
@@ -24,6 +25,7 @@ from resale_price_agent.ebay_client import ListingSnapshot
 from resale_price_agent.llm_reasoning import get_llm_decision
 from resale_price_agent.notifier import notify
 from resale_price_agent.price_drop import check_price_drops
+from resale_price_agent.recommendation import evaluate, record_recommendation
 from resale_price_agent.signals import compute_signals
 
 log = logging.getLogger(__name__)
@@ -178,7 +180,10 @@ def poll_all_items(
                 )
                 snapshot_dicts = [snapshot_to_dict(s) for s in listings]
                 snapshot_dicts = filter_outliers(engine, item_id, snapshot_dicts)
-                count = insert_snapshots(engine, item_id, snapshot_dicts)
+                batch_id = uuid.uuid4().hex
+                count = insert_snapshots(
+                    engine, item_id, snapshot_dicts, poll_batch_id=batch_id,
+                )
                 total_snapshots += count
                 processed += 1
                 log.info(
@@ -202,8 +207,13 @@ def poll_all_items(
                 history_snapshots=prior_snapshots,
             )
 
-            # --- Signal computation + LLM decision ---
+            # --- Signal computation + deterministic recommendation ---
             signals = compute_signals(engine, item_id)
+            if not skip_ebay:
+                rec = evaluate(signals)
+                record_recommendation(engine, item_id, batch_id, rec)
+
+            # --- LLM decision ---
             listing_summary = _build_listing_summary(snapshot_dicts)
             llm_kwargs = {"client": llm_client} if llm_client else {}
             llm_result = get_llm_decision(

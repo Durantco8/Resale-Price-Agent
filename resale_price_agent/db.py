@@ -99,6 +99,8 @@ decisions = Table(
     Column("confidence", Float, nullable=True),
     Column("reasoning", Text, nullable=True),
     Column("outcome", Text, nullable=True),
+    Column("ruleset_version", String, nullable=True),
+    Column("source_poll_batch_id", String, nullable=True),
 )
 
 alerts = Table(
@@ -180,6 +182,25 @@ def _migrate_schema(engine) -> None:
                 "ON snapshots (tracked_item_id, poll_batch_id)"
             )
         )
+
+    # --- decisions table: deterministic recommendation provenance ---
+    if "decisions" in inspector.get_table_names():
+        dec_cols = {c["name"] for c in inspector.get_columns("decisions")}
+        with engine.begin() as conn:
+            if "ruleset_version" not in dec_cols:
+                conn.execute(text(
+                    "ALTER TABLE decisions ADD COLUMN ruleset_version VARCHAR"
+                ))
+            if "source_poll_batch_id" not in dec_cols:
+                conn.execute(text(
+                    "ALTER TABLE decisions ADD COLUMN source_poll_batch_id VARCHAR"
+                ))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_deterministic_rec "
+                "ON decisions (tracked_item_id, source_poll_batch_id, "
+                "ruleset_version) "
+                "WHERE event_type = 'deterministic_recommendation'"
+            ))
 
 
 # ---------------------------------------------------------------------------

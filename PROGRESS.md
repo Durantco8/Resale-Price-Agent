@@ -1,6 +1,6 @@
 # Resale Price Agent — Progress Summary
 
-*Last updated: Sep 3, 2026 (Session 5, Phase 1 complete). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
+*Last updated: Sep 3, 2026 (Session 6, Phase 2 complete). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
 
 **Project path:** `/Users/durantco/Documents/RESUME PROJECTS/Resale Price Agent`
 **GitHub:** `Durantco8/Resale-Price-Agent`
@@ -203,6 +203,7 @@ This backlog is no longer a core-product task. A similar queue may be useful lat
 - **The system is demand-driven, not exhaustive** — not trying to track "every item on eBay." Curated seed list (baseline content) + real user searches, growing organically. No architecture changes needed as this scales into the hundreds/low-thousands.
 - **Diagnostic-before-destructive is the standing pattern** — every deletion or reset (DB cleanup checks, both wipes, the targeted cleanup) has been preceded by an explicit "report what's there / propose the plan, don't execute yet" step, with exact row counts reported before any delete runs. **This must continue for any future destructive action, including the eventual SQLite→Postgres migration.**
 - **Verify claims against the actual codebase/DB state rather than trusting prior documentation** — the SQLite/Postgres correction (Section 8) is a direct lesson: earlier assumptions were wrong and went uncorrected for a while. When in doubt, check.
+- **Test-first development** — permanent project standard. When implementing new code or fixing a bug: (1) write or update the relevant test first, (2) run it and confirm it fails for the expected reason, (3) implement the smallest code change needed to make it pass, (4) run the targeted test again, (5) run the broader relevant test set, (6) run the full suite before committing. Do not write the implementation first and add tests afterward unless there is a clear reason the change cannot reasonably be tested first — if that exception occurs, explain why before proceeding.
 
 ---
 
@@ -259,30 +260,75 @@ The reason for the change is scalability and reliability: the catalogue already 
 
 **Tests:** 262 passed, 1 non-blocking third-party `google.genai` deprecation warning. New coverage verifies automatic/separate batch IDs, legacy migration/backfill grouping, one-batch insufficiency, multi-batch price and supply direction, robust statistics, unique-listing counts, history span/freshness, and exclusion of the current batch from price-drop history.
 
-### Recommended Phase 2
+### Phase 2 completed
 
-**Status: not implemented. No Phase 2 application-code changes have started.**
+**Status: implemented, tested, integrated into poller.**
 
-The exact approved Phase 2 boundary is:
+The deterministic recommendation engine is live in `resale_price_agent/recommendation.py` with versioned rules (`RULESET_VERSION = "v1.0"`), gated scoring, idempotent storage, and a dedicated latest-recommendation query.
 
-- Implement a pure, versioned deterministic recommendation module with transparent, table-driven `BUY` / `WAIT` / `SKIP` rules.
-- Apply explicit evidence and confidence gates. A score alone must never create `BUY` without sufficient longitudinal evidence; insufficient or sparse history must safely produce low-confidence `WAIT`, not `SKIP`.
-- Store authoritative results as `deterministic_recommendation`, clearly separate from legacy `llm_reasoning` and `price_drop_alert` events.
-- Add the minimum additive decision provenance needed for auditability and idempotency (for example `decision_engine`, `ruleset_version`, and `source_poll_batch`). The same item/batch/ruleset must not create duplicates.
-- Add an explicit latest-deterministic-recommendation query so newer non-recommendation events cannot hide the current core recommendation.
-- Cover multi-batch `BUY` / `WAIT` / `SKIP`, insufficient-history `WAIT`, exact rule boundaries, idempotency/duplicate prevention, and latest-recommendation selection with tests.
-- Do **not** move email alerts or owner notifications to the deterministic engine yet.
-- Do **not** remove Gemini. It remains available for eventual optional `llm_analysis`, but it cannot control or override the deterministic action.
-- Do **not** reset the database or destructively alter production data.
+#### v1.0 Rule Gates
+
+| Gate | Condition | Result | Confidence |
+|------|-----------|--------|------------|
+| 0: Insufficient data | `not sufficient_data` (needs ≥5 snaps, ≥2 batches) | WAIT | 0.20 |
+| Null guard | `latest_batch_median`, `historical_median`, or `freshness_hours` is None | WAIT | 0.20 |
+| 1: Stale data | `freshness_hours > 72` | WAIT | 0.25 |
+| 2: BUY | Latest median ≥10% below historical AND price trend not rising | BUY | 0.50–0.90 |
+| 3: SKIP | Latest median ≥20% above historical OR prices rising ≥15% | SKIP | 0.50–0.75 |
+| 4: Default | No strong signal | WAIT | 0.40–0.60 |
+
+**Key design decisions:**
+- 10% BUY threshold (not 5%) — aligned with the existing 12% price-drop alert threshold to avoid triggering on normal fluctuation.
+- **Falling supply does NOT gate BUY** — a discounted item is not rejected because supply is shrinking. Supply only modifies confidence (-0.05 for falling, +0.05 for rising).
+- **Falling supply alone never triggers SKIP** — SKIP requires strong negative pricing evidence (materially overpriced or sustained price rise), not supply direction.
+- SKIP thresholds are conservative: 20% overpriced (not 15%), 15% rising (not 10%).
+- SKIP confidence capped at 0.75; BUY capped at 0.90. Neither reaches 1.0.
+- Insufficient data always produces WAIT (never SKIP) with lowest confidence (0.20).
+
+**BUY confidence bonuses:** +0.10 at 15% discount, +0.10 at 20%, +0.05 falling prices, +0.05 rising supply, -0.05 falling supply, +0.05 for ≥4 batches, +0.05 for ≥7d history.
+
+#### Validation scenarios (approved before implementation)
+
+| Scenario | Result | Why correct |
+|----------|--------|-------------|
+| Jordan 4 — 12% discount, falling prices, stable supply | BUY 0.55 | Real discount above threshold, prices moving in buyer's favor |
+| Steam Deck — flat market, no discount | WAIT 0.55 | No discount, no alarm — sensible patience |
+| Pokemon 151 ETB — 25% above historical, rising 18% | SKIP 0.65 | Both SKIP conditions fire — materially overpriced and rising fast |
+| AirPods Pro 2 — 15% discount but supply falling | BUY 0.65 | **Falling supply does NOT block BUY** — price/value comes first |
+| Contax T2 — only 2 snapshots, 1 batch | WAIT 0.20 | Insufficient data, lowest confidence |
+| KitchenAid — 7% discount | WAIT 0.50 | Below 10% BUY threshold — normal fluctuation |
+| LEGO Falcon — 5 days since last poll | WAIT 0.25 | Stale data, can't trust signals |
+| iPhone 15 PM — 20% discount but prices rising 8% | WAIT 0.50 | Discount is real but prices climbing back — not BUY (rising blocks it), not SKIP (only 8% rise, below 15%) |
+
+#### Schema changes
+
+Two additive nullable columns on `decisions` table:
+- `ruleset_version` (String) — e.g. `"v1.0"`, only populated for deterministic recommendations.
+- `source_poll_batch_id` (String) — links recommendation to the poll batch that triggered it.
+
+Partial unique index `uq_deterministic_rec` on `(tracked_item_id, source_poll_batch_id, ruleset_version) WHERE event_type = 'deterministic_recommendation'` — enforces idempotency without affecting existing `price_drop_alert` or `llm_reasoning` rows.
+
+Migration validated against a temporary copy of the real 3,326-snapshot database: columns added, existing 202 decisions preserved with NULL provenance (correct), no data loss.
+
+#### Poller integration
+
+In `poll_all_items()`, the deterministic recommendation runs after `compute_signals()` and before the LLM decision. The poller generates a `poll_batch_id` (UUID) before `insert_snapshots()` and passes it to both snapshot storage and `record_recommendation()`. Deterministic recommendations are skipped when `skip_ebay=True` (no new batch = no new recommendation). Notification routing is unchanged — still driven by LLM decisions and price-drop alerts.
+
+#### Files changed
+
+- `resale_price_agent/recommendation.py` — **new**: `evaluate()`, `record_recommendation()`, `get_latest_deterministic_recommendation()`
+- `resale_price_agent/db.py` — two additive columns on `decisions` + migration logic for partial unique index
+- `resale_price_agent/poller.py` — generate batch_id upfront, call evaluate + record after compute_signals
+- `tests/test_recommendation.py` — **new**: 44 tests across 4 categories (pure rules, idempotency, latest-rec query, migration)
+
+**Tests:** 306 passed (262 existing + 44 new), 1 non-blocking google.genai deprecation warning.
 
 ### Current cautions / unresolved context
 
-- The working SQLite database was deliberately not opened through the new migration during Phase 1. It still has 3,326 snapshots and will receive the additive `poll_batch_id` column/backfill automatically on its next `get_engine()` open; the migration was already validated against a temporary full copy.
-- Those 3,326 legacy rows represent only one real polling batch per tracked item. After backfill, existing items therefore remain longitudinally immature until additional polls occur, even when their row-count status is `active`.
-- The current `active` status threshold is still based on snapshot-row count rather than poll-batch maturity.
-- `tracked_items` still has no `target_price` column even though price-drop code can accept a target price; that path is not currently configurable from the live schema.
-- `/api/trending` currently asks for the latest decision of any event type. Phase 2's explicit latest deterministic query must prevent a newer `price_drop_alert` or legacy LLM event from masquerading as the current recommendation.
-- Current `buy_now` public alerts and owner notifications still depend on `LLMDecision`; notification migration and delivery deduplication are intentionally later work.
-- Separate known issues remain: residual item/accessory matching quality, sneaker counterfeit detection, SQLite-to-hosted-Postgres/Render deployment, and clickable chart points.
-
-**Exact next step when work resumes:** implement and test the pure deterministic rule/result model first, then add additive provenance/idempotent storage and the latest-deterministic-recommendation query. Integrate it into polling only after those unit/storage tests are green, without changing notification routing.
+- All 76 items currently have only 1 poll batch (legacy data). Every item will produce `WAIT confidence=0.20` until additional polls run and items accumulate ≥2 batches.
+- The `active` status threshold is still row-count based (≥5 snapshots), not batch-maturity based. The deterministic engine's Gate 0 (`sufficient_data`) handles this at the recommendation level.
+- `tracked_items` still has no `target_price` column even though price-drop code can accept a target price; not currently configurable from the live schema.
+- `/api/trending` currently asks for the latest decision of any event type. The new `get_latest_deterministic_recommendation()` query is available but not yet wired into the API/UI.
+- Current `buy_now` public alerts and owner notifications still depend on `LLMDecision`; notification migration to the deterministic engine is intentionally later work.
+- Gemini remains in place for eventual optional `llm_analysis`. It cannot override the deterministic recommendation.
+- Separate known issues remain: sneaker counterfeit detection, SQLite-to-hosted-Postgres/Render deployment, and clickable chart points.
