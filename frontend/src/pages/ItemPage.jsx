@@ -4,6 +4,7 @@ import { getItem } from '../api';
 import SearchBar from '../components/SearchBar';
 import PriceChart from '../components/PriceChart';
 import ListingStats from '../components/ListingStats';
+import RecentListings from '../components/RecentListings';
 import DecisionLog from '../components/DecisionLog';
 import CollectingState from '../components/CollectingState';
 import NotifyForm from '../components/NotifyForm';
@@ -59,6 +60,7 @@ export default function ItemPage() {
       ) : (
         <>
           <ListingStats snapshots={snapshots} />
+          <RecentListings snapshots={snapshots} />
           <PriceChart snapshots={snapshots} />
           <DecisionLog decisions={decisions} />
         </>
