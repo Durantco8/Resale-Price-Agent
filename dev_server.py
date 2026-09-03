@@ -37,13 +37,13 @@ class MockEbayClient:
         now = datetime.now(timezone.utc).isoformat()
         return [
             ListingSnapshot(
-                item_id=f"v1|{abs(hash(query + str(i))) % 999999}|0",
+                item_id=f"v1|{abs(hash(query + str(i))) % 900000000000 + 100000000000}|0",
                 title=f"{query} - Listing {i + 1}",
                 price_amount=round(base + random.uniform(-20, 20), 2),
                 price_currency="USD",
                 condition=random.choice(["New", "New with box", "Pre-owned"]),
                 seller_feedback_score=random.randint(50, 5000),
-                item_url=f"https://www.ebay.com/itm/{abs(hash(query + str(i))) % 999999}",
+                item_url=f"https://www.ebay.com/itm/{abs(hash(query + str(i))) % 900000000000 + 100000000000}",
                 shipping_cost=round(random.uniform(0, 12), 2),
                 item_location="New York, NY, US",
                 buying_options=["FIXED_PRICE"],
