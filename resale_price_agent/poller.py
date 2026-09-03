@@ -32,11 +32,12 @@ STATUS_THRESHOLD = 5
 
 POLL_INTERVAL_HOURS = 3
 
-# Snapshots priced below this fraction of the rolling median are
-# dropped as likely accessories/parts.  Only applied once enough
-# history exists to compute a meaningful median (MIN_SNAPSHOTS_FOR_FILTER).
+# Snapshots priced below this fraction of the median are dropped as
+# likely accessories/parts.  Applied against historical data when
+# available, or against the current batch on cold start.
 OUTLIER_FLOOR_RATIO = 0.4
-MIN_SNAPSHOTS_FOR_FILTER = 5
+MIN_SNAPSHOTS_FOR_FILTER = 5   # historical median threshold
+MIN_BATCH_FOR_FILTER = 8       # cold-start batch median threshold
 
 
 def snapshot_to_dict(snap: ListingSnapshot) -> dict:
@@ -76,28 +77,41 @@ def filter_outliers(
     engine, item_id: int, snapshot_dicts: list[dict],
     floor_ratio: float = OUTLIER_FLOOR_RATIO,
     min_snapshots: int = MIN_SNAPSHOTS_FOR_FILTER,
+    min_batch: int = MIN_BATCH_FOR_FILTER,
 ) -> list[dict]:
-    """Drop snapshots priced suspiciously below the rolling median.
+    """Drop snapshots priced suspiciously below the median.
 
-    Returns the filtered list.  Skips filtering when there aren't
-    enough prior snapshots to compute a reliable median.
+    Uses historical snapshots when enough exist, otherwise falls back
+    to the current batch's own median for cold-start filtering.
+    Skips filtering entirely when neither source has enough data.
     """
     if not snapshot_dicts:
         return snapshot_dicts
 
     existing = get_snapshots_for_item(engine, item_id)
-    if len(existing) < min_snapshots:
+
+    if len(existing) >= min_snapshots:
+        # Established item — use historical median
+        median_price = statistics.median(s["price"] for s in existing)
+        source = "historical"
+    elif len(snapshot_dicts) >= min_batch:
+        # Cold start — use the current batch's median
+        median_price = statistics.median(s["price"] for s in snapshot_dicts)
+        source = "batch"
+    else:
+        # Not enough data from either source
         return snapshot_dicts
 
-    median_price = statistics.median(s["price"] for s in existing)
     floor_price = median_price * floor_ratio
 
     kept = [s for s in snapshot_dicts if s["price"] >= floor_price]
     dropped = len(snapshot_dicts) - len(kept)
     if dropped:
         log.info(
-            "  #%d — dropped %d outlier(s) below $%.2f (%.0f%% of median $%.2f)",
-            item_id, dropped, floor_price, floor_ratio * 100, median_price,
+            "  #%d — dropped %d outlier(s) below $%.2f "
+            "(%.0f%% of %s median $%.2f)",
+            item_id, dropped, floor_price, floor_ratio * 100,
+            source, median_price,
         )
     return kept
 

@@ -416,13 +416,14 @@ class TestOutlierFilter:
         assert len(result) == 1
         assert result[0]["title"] == "Real item"
 
-    def test_skips_filter_when_not_enough_history(self, engine):
-        """With fewer than MIN_SNAPSHOTS_FOR_FILTER, all listings pass."""
+    def test_skips_filter_when_not_enough_history_or_batch(self, engine):
+        """With too few history AND too few batch items, nothing filtered."""
         from resale_price_agent.poller import filter_outliers
 
         item, _, _ = get_or_create_tracked_item(engine, "New Item")
         _seed_history(engine, item["id"], [200.0, 210.0])
 
+        # Only 2 history + 2 batch items — below both thresholds
         new_snaps = [
             {"price": 10.0, "title": "Cheap thing"},
             {"price": 180.0, "title": "Normal thing"},
@@ -451,6 +452,79 @@ class TestOutlierFilter:
 
         item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
         assert filter_outliers(engine, item["id"], []) == []
+
+    def test_cold_start_drops_accessory_outlier(self, engine):
+        """On cold start (no history), batch median filter catches
+        extreme outliers like a screen protector among real phones.
+
+        Regression test for Samsung Galaxy Z Flip 5 contamination:
+        $27 screen protector surviving first poll alongside $86+ phones.
+        """
+        from resale_price_agent.poller import filter_outliers
+
+        item, _, _ = get_or_create_tracked_item(engine, "Samsung Galaxy Z Flip 5")
+        # No history at all — cold start
+
+        # Simulate realistic batch: 1 accessory, rest are phones
+        new_snaps = [
+            {"price": 27.36, "title": "Screen Protector for Z Flip 5"},
+            {"price": 86.0, "title": "Z Flip 5 broken screen"},
+            {"price": 130.0, "title": "Z Flip 5 256GB unlocked"},
+            {"price": 200.0, "title": "Z Flip 5 256GB mint"},
+            {"price": 250.0, "title": "Z Flip 5 512GB"},
+            {"price": 300.0, "title": "Z Flip 5 512GB new"},
+            {"price": 350.0, "title": "Z Flip 5 512GB sealed"},
+            {"price": 400.0, "title": "Z Flip 5 512GB sealed"},
+            {"price": 450.0, "title": "Z Flip 5 1TB new"},
+            {"price": 500.0, "title": "Z Flip 5 1TB sealed"},
+        ]
+        result = filter_outliers(engine, item["id"], new_snaps)
+
+        # Batch median is ~275, floor is 275 * 0.4 = 110
+        # Screen protector ($27.36) and broken phone ($86) dropped
+        titles = [s["title"] for s in result]
+        assert "Screen Protector for Z Flip 5" not in titles
+        assert "Z Flip 5 256GB unlocked" in titles
+        assert len(result) >= 8
+
+    def test_cold_start_skips_small_batch(self, engine):
+        """Cold-start filter doesn't activate with too few listings.
+
+        Regression test: MTG MH3 Collector Box with only 2 listings
+        should keep both, even if prices vary wildly.
+        """
+        from resale_price_agent.poller import filter_outliers
+
+        item, _, _ = get_or_create_tracked_item(engine, "MTG MH3 Collector Box")
+        # No history, only 2 listings
+        new_snaps = [
+            {"price": 10.0, "title": "Cheap listing"},
+            {"price": 125.0, "title": "Expensive listing"},
+        ]
+        result = filter_outliers(engine, item["id"], new_snaps)
+
+        assert len(result) == 2
+
+    def test_cold_start_keeps_uniform_cheap_items(self, engine):
+        """Items that are legitimately cheap (e.g. tumblers at $30-50)
+        should not have listings stripped by the batch filter."""
+        from resale_price_agent.poller import filter_outliers
+
+        item, _, _ = get_or_create_tracked_item(engine, "Stanley Tumbler")
+        new_snaps = [
+            {"price": 25.0, "title": "Stanley 40oz"},
+            {"price": 30.0, "title": "Stanley 40oz"},
+            {"price": 32.0, "title": "Stanley 40oz"},
+            {"price": 35.0, "title": "Stanley 40oz"},
+            {"price": 38.0, "title": "Stanley 40oz"},
+            {"price": 40.0, "title": "Stanley 40oz"},
+            {"price": 42.0, "title": "Stanley 40oz"},
+            {"price": 45.0, "title": "Stanley 40oz"},
+        ]
+        result = filter_outliers(engine, item["id"], new_snaps)
+
+        # Median ~36.5, floor ~14.6 — all kept
+        assert len(result) == 8
 
 
 # ---------------------------------------------------------------------------
