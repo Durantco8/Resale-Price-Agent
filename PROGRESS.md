@@ -1,6 +1,6 @@
 # Resale Price Agent — Progress Summary
 
-*Last updated: Sep 3, 2026 (Session 4). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
+*Last updated: Sep 3, 2026 (Session 5, Phase 1 complete). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
 
 **Project path:** `/Users/durantco/Documents/RESUME PROJECTS/Resale Price Agent`
 **GitHub:** `Durantco8/Resale-Price-Agent`
@@ -171,7 +171,7 @@ The repaired `reset_data.py` now implements the reusable safety valve: preview e
 ### c) Sneaker/streetwear counterfeit problem
 Not addressed. Category filtering doesn't help since fakes share the same real category as genuine items. Will likely need a different signal (seller feedback score, eBay's authenticity guarantee flag if exposed via API, or accept as a known limitation with a UI disclaimer).
 
-### d) Gemini/polling decoupling (diagnosed, not built)
+### d) Gemini/polling decoupling (deferred; optional analysis only)
 **Diagnosis complete (Session 3):** Currently, LLM reasoning happens inline in the same per-item loop as eBay fetch + snapshot insert (`poller.py` ~lines 186-191). Snapshots are already committed before the LLM call, so eBay data collection already survives Gemini rate-limit failures today (confirmed — see Section 7).
 
 **What's missing for a full decouple:**
@@ -179,11 +179,11 @@ Not addressed. Category filtering doesn't help since fakes share the same real c
 2. `_build_listing_summary` currently takes the in-memory snapshot list from the current poll — a separate later LLM pass would need to reconstruct this from stored snapshots instead.
 3. `process_alerts` currently depends on the LLM result — if reasoning runs later/separately, alerts would also fire later.
 
-**Proposed target architecture:**
+**Formerly proposed architecture (superseded by Section 14):**
 - Phase A (poll): `eBay → snapshots → signals → price_drop detection → store`
 - Phase B (reason): `items needing decisions → compute_signals → LLM → store decision → alerts → notifications`
 
-Phase B could be a separate CLI command (e.g. `python -m resale_price_agent.reason`) or a second pass within the same poll run. Effort estimated as small — most of the data flow is already modular (`compute_signals()` reads from DB, `get_llm_decision()` just needs signals + a listing summary buildable from `get_snapshots_for_item()`). Main work: the "needs decision" query + a CLI entry point. **Not currently blocking anything — queued as a future architecture improvement, not urgent.**
+This backlog is no longer a core-product task. A similar queue may be useful later for optional `llm_analysis`, but Gemini will not generate or override the authoritative recommendation.
 
 ---
 
@@ -222,4 +222,42 @@ Phase B could be a separate CLI command (e.g. `python -m resale_price_agent.reas
 - Clickable price-chart listing links remain queued.
 
 ### Recommended next task
-Implement Gemini/polling decoupling, beginning with a tested query that identifies items whose newest snapshots are newer than their latest successful `llm_reasoning` decision. This closes the largest functional gap without touching deployment or destructively changing the current dataset.
+**Superseded by the approved deterministic direction and Phase 2 recommendation in Section 14.** Do not resume core Gemini/polling decoupling.
+
+---
+
+## 14. Approved Decision-Engine Direction (Session 5)
+
+The product's recommendation architecture has changed before the previously planned Gemini backlog/decoupling work was implemented:
+
+- **Deterministic/statistical `BUY` / `WAIT` / `SKIP` is now the authoritative recommendation system.**
+- Every tracked item should eventually receive a recommendation independently of Gemini availability or quota.
+- Gemini is being repositioned as an optional `llm_analysis` explanation/advanced-analysis layer.
+- Gemini analysis must never override the deterministic action.
+- The previously proposed Gemini backlog/decoupling work is deferred unless it is useful later for optional AI analysis.
+
+The reason for the change is scalability and reliability: the catalogue already contains 76 tracked items while the observed Gemini quota is roughly 20 reasoning calls per day. Core recommendations must remain available to every tracked item and user without depending on an external LLM quota.
+
+**Approved pipeline:**
+
+`eBay → filtering → snapshots → longitudinal statistical signals → deterministic BUY / WAIT / SKIP`
+
+### Phase 1 completed
+
+- Added an explicit UUID `poll_batch_id` to snapshots. Every `insert_snapshots()` call creates one batch unless a caller supplies a batch ID explicitly.
+- Added a small additive schema migration. Existing rows are backfilled deterministically by tracked item + their formerly shared snapshot timestamp, preserving the legacy batch grouping without deleting or rewriting snapshot content.
+- Added an `(tracked_item_id, poll_batch_id)` index.
+- Reworked `compute_signals()` so price and listing direction compare distinct poll batches. A single fetch can no longer manufacture a longitudinal trend by splitting its listings in half.
+- `sufficient_data` now requires at least 5 snapshots across at least 2 distinct poll batches.
+- Added batch count, history span, latest-batch time and median, prior batch-median baseline, median of batch medians, 25th/75th percentiles, IQR, unique eBay listing count, latest-batch unique count, and freshness.
+- Listing-volume trends use unique eBay IDs per batch rather than raw snapshot rows.
+- Fixed price-drop orchestration so the current poll batch is excluded from its own historical baseline. The existing cold-start outlier filter was not changed.
+- Kept the Gemini implementation in place. No deterministic `BUY` / `WAIT` / `SKIP` formula, decision storage, API/UI changes, or notification routing changes were added in Phase 1.
+
+**Migration validation:** The additive migration was exercised against a temporary copy of the real 3,326-snapshot SQLite database: all rows received non-empty batch IDs, grouped into the expected 76 item/batch pairs, and no rows were lost. The working database itself was not modified during this task; the migration will run automatically the next time the application opens it through `get_engine()`.
+
+**Tests:** 262 passed, 1 non-blocking third-party `google.genai` deprecation warning. New coverage verifies automatic/separate batch IDs, legacy migration/backfill grouping, one-batch insufficiency, multi-batch price and supply direction, robust statistics, unique-listing counts, history span/freshness, and exclusion of the current batch from price-drop history.
+
+### Recommended Phase 2
+
+Implement a pure, versioned deterministic recommendation module and idempotent `deterministic_recommendation` storage. Start with explicit evidence/confidence gates (especially poll-batch maturity), then table-driven `BUY` / `WAIT` / `SKIP` rules. Keep Gemini non-authoritative and keep notification routing unchanged until the deterministic results and API selection behavior are proven with tests.

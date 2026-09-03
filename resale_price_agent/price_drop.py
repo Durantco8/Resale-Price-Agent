@@ -67,6 +67,7 @@ def check_price_drops(
     min_history: int = MIN_HISTORY_SNAPSHOTS,
     dedup_window_hours: int = DEDUP_WINDOW_HOURS,
     daily_cap: int = DAILY_ALERT_CAP,
+    history_snapshots: list[dict] | None = None,
 ) -> list[int]:
     """Check new snapshots for price drops and log alerts.
 
@@ -86,7 +87,13 @@ def check_price_drops(
     # average check is meaningless.  Target-price alerts still fire —
     # a listing at or below the user's target is actionable regardless
     # of history.
-    all_prior = get_snapshots_for_item(engine, tracked_item_id)
+    # The poller passes the history captured before it inserts the current
+    # batch.  Standalone callers retain the original DB-backed behavior.
+    all_prior = (
+        history_snapshots
+        if history_snapshots is not None
+        else get_snapshots_for_item(engine, tracked_item_id)
+    )
     is_first_poll = not all_prior
     if is_first_poll:
         log.info(
@@ -104,7 +111,15 @@ def check_price_drops(
     rolling_avg = None
     if not is_first_poll:
         since = datetime.now(timezone.utc) - timedelta(days=window_days)
-        history = get_snapshots_for_item(engine, tracked_item_id, since=since)
+        if history_snapshots is None:
+            history = get_snapshots_for_item(
+                engine, tracked_item_id, since=since,
+            )
+        else:
+            history = [
+                snap for snap in all_prior
+                if _snapshot_time_utc(snap) >= since
+            ]
         prices = [s["price"] for s in history]
 
         if len(prices) >= min_history:
@@ -181,3 +196,14 @@ def check_price_drops(
         )
 
     return alerts
+
+
+def _snapshot_time_utc(snapshot: dict) -> datetime:
+    value = snapshot["snapshot_time"]
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

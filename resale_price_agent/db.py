@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
@@ -22,6 +23,8 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    inspect,
+    text,
 )
 
 metadata = MetaData()
@@ -66,6 +69,17 @@ snapshots = Table(
     Column("buying_format", String, nullable=True),
     Column("item_url", String, nullable=True),
     Column("snapshot_time", DateTime, nullable=False),
+    # One UUID per item poll.  Nullable at the physical-schema level so the
+    # existing SQLite database can receive this additive column without a
+    # table rewrite; all application inserts populate it, and the migration
+    # backfills every legacy row.
+    Column("poll_batch_id", String, nullable=True),
+)
+
+Index(
+    "ix_snapshots_tracked_item_poll_batch",
+    snapshots.c.tracked_item_id,
+    snapshots.c.poll_batch_id,
 )
 
 decisions = Table(
@@ -110,8 +124,62 @@ alerts = Table(
 
 def get_engine(db_url: str = "sqlite:///resale_agent.db"):
     engine = create_engine(db_url, echo=False)
+    _migrate_schema(engine)
     metadata.create_all(engine)
     return engine
+
+
+def _legacy_poll_batch_id(tracked_item_id: int, snapshot_time) -> str:
+    """Build a stable batch ID for legacy rows sharing item + timestamp."""
+    identity = f"resale-price-agent:{tracked_item_id}:{snapshot_time}"
+    return uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
+
+
+def _migrate_schema(engine) -> None:
+    """Apply small, additive schema migrations before ``create_all``.
+
+    Existing snapshots were inserted with one identical ``snapshot_time`` per
+    item poll, so item + timestamp is a safe legacy grouping for the one-time
+    poll-batch backfill.  New writes always receive an explicit UUID.
+    """
+    inspector = inspect(engine)
+    if "snapshots" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("snapshots")}
+    with engine.begin() as conn:
+        if "poll_batch_id" not in column_names:
+            conn.execute(text("ALTER TABLE snapshots ADD COLUMN poll_batch_id VARCHAR"))
+
+        legacy_rows = conn.execute(
+            text(
+                "SELECT id, tracked_item_id, snapshot_time "
+                "FROM snapshots WHERE poll_batch_id IS NULL OR poll_batch_id = ''"
+            )
+        ).mappings().all()
+        if legacy_rows:
+            conn.execute(
+                text(
+                    "UPDATE snapshots SET poll_batch_id = :poll_batch_id "
+                    "WHERE id = :snapshot_id"
+                ),
+                [
+                    {
+                        "snapshot_id": row["id"],
+                        "poll_batch_id": _legacy_poll_batch_id(
+                            row["tracked_item_id"], row["snapshot_time"]
+                        ),
+                    }
+                    for row in legacy_rows
+                ],
+            )
+
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_snapshots_tracked_item_poll_batch "
+                "ON snapshots (tracked_item_id, poll_batch_id)"
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -299,10 +367,16 @@ def set_tracked_item_status(engine, item_id: int, status: str) -> bool:
 # Snapshots
 # ---------------------------------------------------------------------------
 
-def insert_snapshots(engine, tracked_item_id: int, snapshot_list: list[dict]) -> int:
+def insert_snapshots(
+    engine,
+    tracked_item_id: int,
+    snapshot_list: list[dict],
+    poll_batch_id: str | None = None,
+) -> int:
     if not snapshot_list:
         return 0
     now = datetime.now(timezone.utc)
+    batch_id = poll_batch_id or uuid.uuid4().hex
     rows = [
         {
             "tracked_item_id": tracked_item_id,
@@ -317,6 +391,7 @@ def insert_snapshots(engine, tracked_item_id: int, snapshot_list: list[dict]) ->
             "buying_format": s.get("buying_format"),
             "item_url": s.get("item_url"),
             "snapshot_time": s.get("snapshot_time", now),
+            "poll_batch_id": batch_id,
         }
         for s in snapshot_list
     ]

@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 
 from resale_price_agent.db import insert_decision
-from resale_price_agent.signals import TrendSignals
+from resale_price_agent.signals import MIN_POLL_BATCHES, MIN_SNAPSHOTS, TrendSignals
 
 log = logging.getLogger(__name__)
 
@@ -75,8 +75,11 @@ def get_llm_decision(
     """
     if not signals.sufficient_data:
         reason = (
-            f"Insufficient data ({signals.snapshot_count} snapshots, "
-            f"need at least 5) — skipping LLM reasoning"
+            "Insufficient longitudinal data "
+            f"({signals.snapshot_count} snapshots across "
+            f"{signals.poll_batch_count} poll batch(es); need at least "
+            f"{MIN_SNAPSHOTS} snapshots across {MIN_POLL_BATCHES} batches) "
+            "— skipping LLM reasoning"
         )
         log.info("  #%d: %s", tracked_item_id, reason)
         return LLMDecision(

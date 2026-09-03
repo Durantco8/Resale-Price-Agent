@@ -1,40 +1,45 @@
-"""Signal computation for the LLM decision layer — pure Python/math."""
+"""Longitudinal market-signal computation — pure Python/math."""
 
-from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+import math
+import statistics
 
 from resale_price_agent.db import get_snapshots_for_item
 
-# Minimum snapshots required to compute meaningful signals.
 MIN_SNAPSHOTS = 5
-
-# Default lookback window.
+MIN_POLL_BATCHES = 2
 WINDOW_DAYS = 14
 
 
 @dataclass(frozen=True)
 class TrendSignals:
-    """LLM-ready summary of an item's recent price and supply trends."""
+    """Batch-aware summary of an item's recent market data."""
 
     sufficient_data: bool
-
-    # Price stats over the window
     avg_price: float | None
     min_price: float | None
     max_price: float | None
     snapshot_count: int
-
-    # Price trend: compare the average price of the recent half of the window
-    # to the older half.
-    price_trend: str | None        # "rising", "falling", or "flat"
-    price_trend_pct: float | None  # signed percentage change (positive = rising)
-
-    # Listing volume trend: same half-split comparison on listing counts.
-    listing_trend: str | None      # "rising", "falling", or "flat"
+    price_trend: str | None
+    price_trend_pct: float | None
+    listing_trend: str | None
     listing_trend_pct: float | None
-
     window_days: int
+
+    # Defaults preserve existing callers that construct this class directly.
+    poll_batch_count: int = 0
+    history_span_days: float = 0.0
+    latest_batch_time: str | None = None
+    freshness_hours: float | None = None
+    latest_batch_listing_count: int = 0
+    latest_batch_median: float | None = None
+    historical_median: float | None = None
+    median_batch_price: float | None = None
+    price_p25: float | None = None
+    price_p75: float | None = None
+    price_iqr: float | None = None
+    unique_listing_count: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -45,17 +50,19 @@ def compute_signals(
     tracked_item_id: int,
     window_days: int = WINDOW_DAYS,
     min_snapshots: int = MIN_SNAPSHOTS,
+    min_poll_batches: int = MIN_POLL_BATCHES,
 ) -> TrendSignals:
-    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=window_days)
     snapshots = get_snapshots_for_item(engine, tracked_item_id, since=since)
 
-    if len(snapshots) < min_snapshots:
+    if not snapshots:
         return TrendSignals(
             sufficient_data=False,
             avg_price=None,
             min_price=None,
             max_price=None,
-            snapshot_count=len(snapshots),
+            snapshot_count=0,
             price_trend=None,
             price_trend_pct=None,
             listing_trend=None,
@@ -63,79 +70,151 @@ def compute_signals(
             window_days=window_days,
         )
 
-    prices = [s["price"] for s in snapshots]
-    avg_price = round(sum(prices) / len(prices), 2)
-    min_price = min(prices)
-    max_price = max(prices)
-
-    # --- Split into older vs newer halves by date ---
-    # Snapshots are returned newest-first; reverse for chronological order.
-    chronological = list(reversed(snapshots))
-    midpoint = len(chronological) // 2
-    older_half = chronological[:midpoint]
-    newer_half = chronological[midpoint:]
-
-    price_trend, price_trend_pct = _compare_halves(
-        [s["price"] for s in older_half],
-        [s["price"] for s in newer_half],
+    batches = _group_poll_batches(snapshots)
+    batch_series = sorted(
+        (
+            (_latest_time(batch), batch_id, batch)
+            for batch_id, batch in batches.items()
+        ),
+        key=lambda entry: entry[0],
     )
+    poll_batch_count = len(batch_series)
 
-    # --- Listing count trend ---
-    # Group snapshots by date, then compare daily listing counts between
-    # the two halves.
-    older_daily = _daily_counts(older_half)
-    newer_daily = _daily_counts(newer_half)
-    listing_trend, listing_trend_pct = _compare_halves(
-        list(older_daily.values()),
-        list(newer_daily.values()),
+    prices = [float(s["price"]) for s in snapshots]
+    sorted_prices = sorted(prices)
+    avg_price = round(sum(prices) / len(prices), 2)
+    price_p25 = _percentile(sorted_prices, 0.25)
+    price_p75 = _percentile(sorted_prices, 0.75)
+
+    batch_medians = [
+        statistics.median(float(s["price"]) for s in batch)
+        for _, _, batch in batch_series
+    ]
+    latest_time, _, latest_batch = batch_series[-1]
+
+    price_trend = None
+    price_trend_pct = None
+    listing_trend = None
+    listing_trend_pct = None
+    if poll_batch_count >= 2:
+        midpoint = poll_batch_count // 2
+        price_trend, price_trend_pct = _compare_periods(
+            batch_medians[:midpoint], batch_medians[midpoint:],
+        )
+
+        unique_counts = [
+            len({s["ebay_item_id"] for s in batch if s.get("ebay_item_id")})
+            for _, _, batch in batch_series
+        ]
+        listing_trend, listing_trend_pct = _compare_periods(
+            unique_counts[:midpoint], unique_counts[midpoint:],
+        )
+
+    first_time = batch_series[0][0]
+    history_span_days = round(
+        max(0.0, (latest_time - first_time).total_seconds()) / 86400,
+        2,
+    )
+    freshness_hours = round(
+        max(0.0, (now - latest_time).total_seconds()) / 3600,
+        2,
     )
 
     return TrendSignals(
-        sufficient_data=True,
+        sufficient_data=(
+            len(snapshots) >= min_snapshots
+            and poll_batch_count >= min_poll_batches
+        ),
         avg_price=avg_price,
-        min_price=min_price,
-        max_price=max_price,
+        min_price=min(prices),
+        max_price=max(prices),
         snapshot_count=len(snapshots),
         price_trend=price_trend,
         price_trend_pct=price_trend_pct,
         listing_trend=listing_trend,
         listing_trend_pct=listing_trend_pct,
         window_days=window_days,
+        poll_batch_count=poll_batch_count,
+        history_span_days=history_span_days,
+        latest_batch_time=latest_time.isoformat(),
+        freshness_hours=freshness_hours,
+        latest_batch_listing_count=len(
+            {s["ebay_item_id"] for s in latest_batch if s.get("ebay_item_id")}
+        ),
+        latest_batch_median=round(batch_medians[-1], 2),
+        historical_median=(
+            round(statistics.median(batch_medians[:-1]), 2)
+            if len(batch_medians) > 1 else None
+        ),
+        median_batch_price=round(statistics.median(batch_medians), 2),
+        price_p25=price_p25,
+        price_p75=price_p75,
+        price_iqr=round(price_p75 - price_p25, 2),
+        unique_listing_count=len(
+            {s["ebay_item_id"] for s in snapshots if s.get("ebay_item_id")}
+        ),
     )
 
 
-def _daily_counts(snapshots: list[dict]) -> dict[str, int]:
-    """Count listings per calendar date."""
-    counts: dict[str, int] = defaultdict(int)
-    for s in snapshots:
-        ts = s["snapshot_time"]
-        if isinstance(ts, datetime):
-            day = ts.strftime("%Y-%m-%d")
-        else:
-            day = str(ts)[:10]
-        counts[day] += 1
-    return dict(counts)
+def _group_poll_batches(snapshots: list[dict]) -> dict[str, list[dict]]:
+    """Group rows by explicit batch ID, with a legacy timestamp fallback."""
+    batches: dict[str, list[dict]] = {}
+    for snapshot in snapshots:
+        batch_id = snapshot.get("poll_batch_id")
+        if not batch_id:
+            batch_id = f"legacy:{snapshot.get('snapshot_time')}"
+        batches.setdefault(str(batch_id), []).append(snapshot)
+    return batches
 
 
-def _compare_halves(
+def _as_utc(value) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_time(snapshots: list[dict]) -> datetime:
+    return max(_as_utc(s["snapshot_time"]) for s in snapshots)
+
+
+def _percentile(sorted_values: list[float], fraction: float) -> float:
+    """Return a linearly interpolated percentile for a non-empty sequence."""
+    if len(sorted_values) == 1:
+        return round(sorted_values[0], 2)
+    position = (len(sorted_values) - 1) * fraction
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return round(sorted_values[lower], 2)
+    weight = position - lower
+    value = sorted_values[lower] + (
+        sorted_values[upper] - sorted_values[lower]
+    ) * weight
+    return round(value, 2)
+
+
+def _compare_periods(
     older_values: list[float], newer_values: list[float]
 ) -> tuple[str, float]:
-    """Compare average of older vs newer values. Returns (direction, pct_change)."""
+    """Compare robust centers of older and newer poll-batch periods."""
     if not older_values or not newer_values:
         return ("flat", 0.0)
 
-    older_avg = sum(older_values) / len(older_values)
-    newer_avg = sum(newer_values) / len(newer_values)
-
-    if older_avg == 0:
+    older_median = statistics.median(older_values)
+    newer_median = statistics.median(newer_values)
+    if older_median == 0:
         return ("flat", 0.0)
 
-    pct_change = round(((newer_avg - older_avg) / older_avg) * 100, 2)
-
-    # Treat changes under 2% as flat to avoid noise.
+    pct_change = round(
+        ((newer_median - older_median) / older_median) * 100,
+        2,
+    )
     if abs(pct_change) < 2.0:
         return ("flat", pct_change)
-    elif pct_change > 0:
+    if pct_change > 0:
         return ("rising", pct_change)
-    else:
-        return ("falling", pct_change)
+    return ("falling", pct_change)

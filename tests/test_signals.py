@@ -26,12 +26,26 @@ def _snap(ebay_id, price, hours_ago=0):
 
 
 def _seed(engine, item_id, price_hour_pairs):
-    """Insert snapshots from a list of (price, hours_ago) tuples."""
-    snaps = [
-        _snap(f"s-{i}", price, hours_ago=h)
-        for i, (price, h) in enumerate(price_hour_pairs)
-    ]
-    insert_snapshots(engine, item_id, snaps)
+    """Insert one synthetic poll batch for each (price, hours_ago) pair."""
+    for i, (price, hours_ago) in enumerate(price_hour_pairs):
+        insert_snapshots(
+            engine,
+            item_id,
+            [_snap(f"s-{hours_ago}-{i}", price, hours_ago=hours_ago)],
+            poll_batch_id=f"batch-{hours_ago}",
+        )
+
+
+def _insert_batch(engine, item_id, prices, hours_ago, batch_id):
+    insert_snapshots(
+        engine,
+        item_id,
+        [
+            _snap(f"{batch_id}-{i}", price, hours_ago=hours_ago)
+            for i, price in enumerate(prices)
+        ],
+        poll_batch_id=batch_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -188,50 +202,101 @@ class TestPriceTrend:
 
 class TestListingTrend:
     def test_rising_supply(self, engine):
-        """More listings per day in newer half = rising supply."""
+        """More unique listings in newer poll batches = rising supply."""
         item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
-        # Older: 1 listing per day across 3 days
-        _seed(engine, item_id, [
-            (200.0, 72), (200.0, 48), (200.0, 24),
-        ])
-        # Newer: 3 listings on one day (= higher daily count)
-        _seed(engine, item_id, [
-            (200.0, 3), (200.0, 2), (200.0, 1),
-        ])
+        _insert_batch(engine, item_id, [200.0], 72, "old-1")
+        _insert_batch(engine, item_id, [200.0], 48, "old-2")
+        _insert_batch(engine, item_id, [200.0] * 3, 6, "new-1")
+        _insert_batch(engine, item_id, [200.0] * 3, 3, "new-2")
 
         signals = compute_signals(engine, item_id)
 
         assert signals.listing_trend == "rising"
 
     def test_falling_supply(self, engine):
-        """Fewer listings per day in newer half = falling supply."""
+        """Fewer unique listings in newer poll batches = falling supply."""
         item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
-        # Older: 3 listings on one day
-        _seed(engine, item_id, [
-            (200.0, 73), (200.0, 72), (200.0, 71),
-        ])
-        # Newer: 1 listing per day across 3 days
-        _seed(engine, item_id, [
-            (200.0, 48), (200.0, 24), (200.0, 1),
-        ])
+        _insert_batch(engine, item_id, [200.0] * 3, 72, "old-1")
+        _insert_batch(engine, item_id, [200.0] * 3, 48, "old-2")
+        _insert_batch(engine, item_id, [200.0], 6, "new-1")
+        _insert_batch(engine, item_id, [200.0], 3, "new-2")
 
         signals = compute_signals(engine, item_id)
 
         assert signals.listing_trend == "falling"
 
     def test_stable_supply(self, engine):
-        """Same daily counts = flat."""
+        """Same unique-listing count per batch = flat."""
         item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
-        # 1 listing per day, spread across 6 distinct days
-        _seed(engine, item_id, [
-            (200.0, 144), (200.0, 120), (200.0, 96),
-            (200.0, 72), (200.0, 48), (200.0, 24),
-        ])
+        for index, hours_ago in enumerate((144, 120, 96, 72, 48, 24)):
+            _insert_batch(
+                engine, item_id, [200.0], hours_ago, f"batch-{index}",
+            )
 
         signals = compute_signals(engine, item_id)
 
-        # 1 listing per day in both halves — trend should be flat
         assert signals.listing_trend == "flat"
+
+
+# ---------------------------------------------------------------------------
+# Poll-batch maturity and robust metrics
+# ---------------------------------------------------------------------------
+
+class TestPollBatchMetrics:
+    def test_one_large_batch_does_not_create_a_trend(self, engine):
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        _insert_batch(
+            engine, item_id,
+            [100.0, 100.0, 100.0, 140.0, 140.0, 140.0],
+            2, "only-poll",
+        )
+
+        signals = compute_signals(engine, item_id)
+
+        assert signals.snapshot_count == 6
+        assert signals.poll_batch_count == 1
+        assert signals.sufficient_data is False
+        assert signals.price_trend is None
+        assert signals.listing_trend is None
+
+    def test_separate_batches_drive_price_trend(self, engine):
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        _insert_batch(engine, item_id, [98.0, 100.0, 102.0], 48, "older")
+        _insert_batch(engine, item_id, [118.0, 120.0, 122.0], 2, "newer")
+
+        signals = compute_signals(engine, item_id)
+
+        assert signals.poll_batch_count == 2
+        assert signals.sufficient_data is True
+        assert signals.price_trend == "rising"
+        assert signals.price_trend_pct == 20.0
+        assert signals.latest_batch_median == 120.0
+        assert signals.historical_median == 100.0
+        assert signals.median_batch_price == 110.0
+
+    def test_robust_dispersion_unique_listings_and_history_span(self, engine):
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        _insert_batch(engine, item_id, [100.0, 110.0, 120.0], 72, "older")
+        insert_snapshots(
+            engine,
+            item_id,
+            [
+                _snap("repeat", 130.0, 1),
+                _snap("repeat", 140.0, 1),
+                _snap("unique", 150.0, 1),
+            ],
+            poll_batch_id="newer",
+        )
+
+        signals = compute_signals(engine, item_id)
+
+        assert signals.unique_listing_count == 5
+        assert signals.latest_batch_listing_count == 2
+        assert signals.price_p25 == 112.5
+        assert signals.price_p75 == 137.5
+        assert signals.price_iqr == 25.0
+        assert 2.9 < signals.history_span_days < 3.0
+        assert 0.9 < signals.freshness_hours < 1.1
 
 
 # ---------------------------------------------------------------------------

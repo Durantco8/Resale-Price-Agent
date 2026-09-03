@@ -159,6 +159,7 @@ def poll_all_items(
 
         try:
             # --- Fetch and store ---
+            prior_snapshots = None
             if skip_ebay:
                 snapshot_dicts = get_snapshots_for_item(engine, item_id, limit=50)
                 processed += 1
@@ -167,6 +168,10 @@ def poll_all_items(
                     item_id, query, len(snapshot_dicts),
                 )
             else:
+                # Capture history before inserting this poll batch.  Price-drop
+                # detection must never use the batch it is evaluating as its
+                # own historical baseline.
+                prior_snapshots = get_snapshots_for_item(engine, item_id)
                 category_ids = item.get("ebay_category_id")
                 listings = ebay_client.search_listings(
                     query, category_ids=category_ids,
@@ -194,6 +199,7 @@ def poll_all_items(
             # --- Price-drop detection ---
             alert_ids = check_price_drops(
                 engine, item_id, snapshot_dicts, target_price=target_price,
+                history_snapshots=prior_snapshots,
             )
 
             # --- Signal computation + LLM decision ---

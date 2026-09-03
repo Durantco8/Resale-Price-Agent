@@ -4,13 +4,14 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from resale_price_agent.db import (
     create_alert,
     get_active_alerts_for_item,
     get_all_tracked_items,
     get_decisions_for_item,
+    get_engine,
     get_or_create_tracked_item,
     get_seeded_items,
     get_snapshots_for_item,
@@ -249,6 +250,55 @@ class TestSnapshots:
 
         rows = get_snapshots_for_item(engine, item["id"])
         assert len(rows) == 2
+        assert rows[0]["poll_batch_id"]
+        assert rows[0]["poll_batch_id"] == rows[1]["poll_batch_id"]
+
+    def test_separate_insert_calls_create_separate_poll_batches(self, engine):
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        insert_snapshots(engine, item["id"], [
+            {"ebay_item_id": "a", "title": "T", "price": 100.0},
+        ])
+        insert_snapshots(engine, item["id"], [
+            {"ebay_item_id": "b", "title": "T", "price": 105.0},
+        ])
+
+        rows = get_snapshots_for_item(engine, item["id"])
+        assert len({row["poll_batch_id"] for row in rows}) == 2
+
+    def test_legacy_schema_migration_backfills_batches(self, tmp_path):
+        db_path = tmp_path / "legacy.db"
+        db_url = f"sqlite:///{db_path}"
+        legacy = create_engine(db_url)
+        with legacy.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE snapshots (
+                    id INTEGER PRIMARY KEY,
+                    tracked_item_id INTEGER NOT NULL,
+                    snapshot_time DATETIME NOT NULL
+                )
+            """))
+            conn.execute(text("""
+                INSERT INTO snapshots (id, tracked_item_id, snapshot_time)
+                VALUES
+                    (1, 7, '2026-09-01 12:00:00'),
+                    (2, 7, '2026-09-01 12:00:00'),
+                    (3, 7, '2026-09-02 12:00:00')
+            """))
+        legacy.dispose()
+
+        migrated = get_engine(db_url)
+        column_names = {
+            column["name"] for column in inspect(migrated).get_columns("snapshots")
+        }
+        with migrated.connect() as conn:
+            batch_ids = conn.execute(text(
+                "SELECT poll_batch_id FROM snapshots ORDER BY id"
+            )).scalars().all()
+
+        assert "poll_batch_id" in column_names
+        assert all(batch_ids)
+        assert batch_ids[0] == batch_ids[1]
+        assert batch_ids[1] != batch_ids[2]
 
     def test_empty_list(self, engine):
         item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")

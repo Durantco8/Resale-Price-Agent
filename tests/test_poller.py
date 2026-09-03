@@ -289,6 +289,31 @@ class TestSnapshotAccumulation:
 # ---------------------------------------------------------------------------
 
 class TestPriceDropDetection:
+    def test_current_poll_batch_is_not_its_own_price_history(self, engine):
+        item, _, _ = get_or_create_tracked_item(engine, "New Item")
+        first_poll = _MockEbay([
+            *[
+                _listing(item_id=f"first-{i}", price=200.0)
+                for i in range(5)
+            ],
+            _listing(item_id="first-low", price=100.0),
+        ])
+
+        poll_all_items(engine, first_poll, _MockLLM())
+
+        first_decisions = get_decisions_for_item(engine, item["id"])
+        assert not any(
+            d["event_type"] == "price_drop_alert" for d in first_decisions
+        )
+
+        second_poll = _MockEbay([
+            _listing(item_id="second-cheap", price=100.0)
+        ])
+        poll_all_items(engine, second_poll, _MockLLM())
+
+        decisions = get_decisions_for_item(engine, item["id"])
+        assert any(d["event_type"] == "price_drop_alert" for d in decisions)
+
     def test_price_drop_runs_for_all_items(self, engine):
         get_or_create_tracked_item(engine, "Item A", owner="me")
         get_or_create_tracked_item(engine, "Item B")  # public
