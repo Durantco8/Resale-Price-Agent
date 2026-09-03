@@ -410,6 +410,49 @@ p {
 }
 
 /* ============================================
+   Recommendation Banner
+   ============================================ */
+.rec-banner {
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  border: 1px solid var(--color-border);
+}
+.rec-banner.action--buy { border-color: var(--color-green); background: var(--color-green-bg); }
+.rec-banner.action--wait { border-color: var(--color-amber); background: var(--color-amber-bg); }
+.rec-banner.action--skip { border-color: var(--color-red); background: var(--color-red-bg); }
+.rec-banner__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.rec-banner__label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+.rec-banner__action {
+  font-size: 18px;
+  font-weight: 700;
+}
+.rec-banner.action--buy .rec-banner__action { color: var(--color-green); }
+.rec-banner.action--wait .rec-banner__action { color: var(--color-amber); }
+.rec-banner.action--skip .rec-banner__action { color: var(--color-red); }
+.rec-banner__confidence {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.rec-banner__reasoning {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ============================================
    Item Page
    ============================================ */
 .item-page {

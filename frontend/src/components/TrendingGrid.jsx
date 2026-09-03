@@ -50,7 +50,7 @@ export default function TrendingGrid() {
       <div className="trending__grid">
         {items.map((entry) => {
           const item = entry.tracked_item;
-          const dec = entry.latest_decision;
+          const dec = entry.recommendation || entry.latest_decision;
           const label = actionLabel(dec);
           return (
             <Link

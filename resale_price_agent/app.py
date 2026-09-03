@@ -23,6 +23,7 @@ from resale_price_agent.db import (
     metadata,
     unsubscribe_by_token,
 )
+from resale_price_agent.recommendation import get_latest_deterministic_recommendation
 from resale_price_agent.search import search
 
 
@@ -133,11 +134,13 @@ def create_app(config=None):
             decs = get_decisions_for_item(engine, item["id"], limit=1)
             if decs:
                 latest_decision = _serialize_row(decs[0])
+            rec = get_latest_deterministic_recommendation(engine, item["id"])
             results.append({
                 "tracked_item": _serialize_item(item),
                 "snapshot_count": snap_count,
                 "status": item["status"],
                 "latest_decision": latest_decision,
+                "recommendation": _serialize_row(rec) if rec else None,
             })
         # Richest data first
         results.sort(key=lambda r: r["snapshot_count"], reverse=True)
@@ -151,6 +154,7 @@ def create_app(config=None):
 
         item_snapshots = get_snapshots_for_item(engine, item_id)
         item_decisions = get_decisions_for_item(engine, item_id)
+        rec = get_latest_deterministic_recommendation(engine, item_id)
 
         return jsonify({
             "tracked_item": _serialize_item(item),
@@ -158,6 +162,7 @@ def create_app(config=None):
             "snapshot_count": len(item_snapshots),
             "snapshots": [_serialize_row(s) for s in item_snapshots],
             "decisions": [_serialize_row(d) for d in item_decisions],
+            "recommendation": _serialize_row(rec) if rec else None,
         })
 
     return app
