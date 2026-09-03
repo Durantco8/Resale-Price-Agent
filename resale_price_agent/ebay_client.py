@@ -100,16 +100,20 @@ class EbayClient:
         self._http_get = http_get or requests.get
 
     def search_listings(
-        self, query: str, limit: int = 50
+        self, query: str, limit: int = 50,
+        category_ids: str | None = None,
     ) -> list[ListingSnapshot]:
         token = self._token_fetcher.get_token()
+        params = {"q": query, "limit": str(limit)}
+        if category_ids:
+            params["category_ids"] = category_ids
         resp = self._http_get(
             self._browse_url,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
             },
-            params={"q": query, "limit": str(limit)},
+            params=params,
         )
         resp.raise_for_status()
         return self._parse_response(resp.json())

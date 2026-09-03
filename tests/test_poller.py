@@ -42,7 +42,7 @@ class _MockEbay:
         self._listings = listings if listings is not None else [_listing()]
         self.search_calls = []
 
-    def search_listings(self, query, limit=50):
+    def search_listings(self, query, limit=50, category_ids=None):
         self.search_calls.append(query)
         return list(self._listings)
 
@@ -51,7 +51,7 @@ class _PerQueryEbay:
     def __init__(self, responses):
         self._responses = responses
 
-    def search_listings(self, query, limit=50):
+    def search_listings(self, query, limit=50, category_ids=None):
         resp = self._responses.get(query, [])
         if isinstance(resp, Exception):
             raise resp
@@ -299,7 +299,7 @@ class TestPriceDropDetection:
             _seed_history(engine, item["id"], [200.0] * 6)
 
         # Very cheap listing triggers price-drop detection
-        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=100.0)])
         result = poll_all_items(engine, ebay, _MockLLM())
 
         # Both items processed, decisions stored for both
@@ -318,7 +318,7 @@ class TestOwnerNotifications:
         get_or_create_tracked_item(engine, "Jordan 4", owner="me")
         _seed_history(engine, 1, [200.0] * 6)
 
-        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=100.0)])
         llm = _MockLLM(action="buy_now", confidence=0.9, reasoning="Great deal.")
         mock_notify_fn = MagicMock()
 
@@ -340,7 +340,7 @@ class TestOwnerNotifications:
         get_or_create_tracked_item(engine, "Nintendo Switch OLED")  # owner=NULL
         _seed_history(engine, 1, [200.0] * 6)
 
-        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=100.0)])
         llm = _MockLLM(action="buy_now", confidence=0.95, reasoning="Buy immediately.")
         mock_notify_fn = MagicMock()
 
@@ -380,7 +380,7 @@ class TestOwnerNotifications:
         seed_tracked_item(engine, "PS5 Console")  # seeded, no owner
         _seed_history(engine, 1, [200.0] * 6)
 
-        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=10.0)])
+        ebay = _MockEbay([_listing(item_id="v1|cheap|0", price=100.0)])
         llm = _MockLLM(action="buy_now", confidence=0.9, reasoning="Deal.")
         mock_notify_fn = MagicMock()
 
@@ -392,3 +392,105 @@ class TestOwnerNotifications:
 
         assert result["notifications"] == 0
         mock_notify_fn.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Outlier filtering
+# ---------------------------------------------------------------------------
+
+class TestOutlierFilter:
+    def test_drops_outliers_below_floor(self, engine):
+        """Listings priced far below the rolling median are dropped."""
+        from resale_price_agent.poller import filter_outliers
+
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _seed_history(engine, item["id"], [200.0] * 6)
+
+        new_snaps = [
+            {"price": 10.0, "title": "Phone case"},
+            {"price": 15.0, "title": "Screen protector"},
+            {"price": 180.0, "title": "Real item"},
+        ]
+        result = filter_outliers(engine, item["id"], new_snaps)
+
+        assert len(result) == 1
+        assert result[0]["title"] == "Real item"
+
+    def test_skips_filter_when_not_enough_history(self, engine):
+        """With fewer than MIN_SNAPSHOTS_FOR_FILTER, all listings pass."""
+        from resale_price_agent.poller import filter_outliers
+
+        item, _, _ = get_or_create_tracked_item(engine, "New Item")
+        _seed_history(engine, item["id"], [200.0, 210.0])
+
+        new_snaps = [
+            {"price": 10.0, "title": "Cheap thing"},
+            {"price": 180.0, "title": "Normal thing"},
+        ]
+        result = filter_outliers(engine, item["id"], new_snaps)
+
+        assert len(result) == 2
+
+    def test_keeps_legitimate_low_prices(self, engine):
+        """Prices above the floor ratio are kept."""
+        from resale_price_agent.poller import filter_outliers
+
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _seed_history(engine, item["id"], [200.0] * 6)
+
+        new_snaps = [
+            {"price": 85.0, "title": "Legit deal"},
+            {"price": 200.0, "title": "Normal price"},
+        ]
+        result = filter_outliers(engine, item["id"], new_snaps)
+
+        assert len(result) == 2
+
+    def test_empty_input_returns_empty(self, engine):
+        from resale_price_agent.poller import filter_outliers
+
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        assert filter_outliers(engine, item["id"], []) == []
+
+
+# ---------------------------------------------------------------------------
+# Category ID passthrough
+# ---------------------------------------------------------------------------
+
+class TestCategoryFiltering:
+    def test_category_id_passed_to_ebay(self, engine):
+        """ebay_category_id from tracked_item flows to search_listings."""
+        from resale_price_agent.db import seed_tracked_item
+
+        seed_tracked_item(engine, "Samsung Galaxy Z Flip 5",
+                          ebay_category_id="9355")
+        items = get_all_tracked_items(engine)
+        assert items[0]["ebay_category_id"] == "9355"
+
+        class _TrackingEbay:
+            def __init__(self):
+                self.calls = []
+            def search_listings(self, query, limit=50, category_ids=None):
+                self.calls.append({"query": query, "category_ids": category_ids})
+                return [_listing()]
+
+        ebay = _TrackingEbay()
+        poll_all_items(engine, ebay, _MockLLM())
+
+        assert ebay.calls[0]["category_ids"] == "9355"
+
+    def test_no_category_id_passes_none(self, engine):
+        """Items without ebay_category_id pass None to search_listings."""
+        get_or_create_tracked_item(engine, "Some item")
+
+        class _TrackingEbay:
+            def __init__(self):
+                self.calls = []
+            def search_listings(self, query, limit=50, category_ids=None):
+                self.calls.append({"category_ids": category_ids})
+                return [_listing()]
+
+        ebay = _TrackingEbay()
+        poll_all_items(engine, ebay, _MockLLM())
+
+        assert ebay.calls[0]["category_ids"] is None

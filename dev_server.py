@@ -31,7 +31,7 @@ from resale_price_agent.seed_list import seed_all
 class MockEbayClient:
     """Returns 2-4 fake listings per query with slightly randomized prices."""
 
-    def search_listings(self, query, limit=50):
+    def search_listings(self, query, limit=50, category_ids=None):
         base = hash(query) % 200 + 50  # deterministic base price per query
         count = random.randint(2, 4)
         now = datetime.now(timezone.utc).isoformat()

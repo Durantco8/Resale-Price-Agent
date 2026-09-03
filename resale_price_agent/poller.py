@@ -10,6 +10,7 @@ One item's failure never blocks the others.
 
 import json
 import logging
+import statistics
 
 from resale_price_agent.alerts import process_alerts
 from resale_price_agent.db import (
@@ -30,6 +31,12 @@ log = logging.getLogger(__name__)
 STATUS_THRESHOLD = 5
 
 POLL_INTERVAL_HOURS = 3
+
+# Snapshots priced below this fraction of the rolling median are
+# dropped as likely accessories/parts.  Only applied once enough
+# history exists to compute a meaningful median (MIN_SNAPSHOTS_FOR_FILTER).
+OUTLIER_FLOOR_RATIO = 0.4
+MIN_SNAPSHOTS_FOR_FILTER = 5
 
 
 def snapshot_to_dict(snap: ListingSnapshot) -> dict:
@@ -63,6 +70,36 @@ def _build_listing_summary(snapshot_dicts: list[dict]) -> str:
     if len(snapshot_dicts) > 5:
         lines.append(f"  ... and {len(snapshot_dicts) - 5} more")
     return "\n".join(lines)
+
+
+def filter_outliers(
+    engine, item_id: int, snapshot_dicts: list[dict],
+    floor_ratio: float = OUTLIER_FLOOR_RATIO,
+    min_snapshots: int = MIN_SNAPSHOTS_FOR_FILTER,
+) -> list[dict]:
+    """Drop snapshots priced suspiciously below the rolling median.
+
+    Returns the filtered list.  Skips filtering when there aren't
+    enough prior snapshots to compute a reliable median.
+    """
+    if not snapshot_dicts:
+        return snapshot_dicts
+
+    existing = get_snapshots_for_item(engine, item_id)
+    if len(existing) < min_snapshots:
+        return snapshot_dicts
+
+    median_price = statistics.median(s["price"] for s in existing)
+    floor_price = median_price * floor_ratio
+
+    kept = [s for s in snapshot_dicts if s["price"] >= floor_price]
+    dropped = len(snapshot_dicts) - len(kept)
+    if dropped:
+        log.info(
+            "  #%d — dropped %d outlier(s) below $%.2f (%.0f%% of median $%.2f)",
+            item_id, dropped, floor_price, floor_ratio * 100, median_price,
+        )
+    return kept
 
 
 def poll_all_items(
@@ -116,8 +153,12 @@ def poll_all_items(
                     item_id, query, len(snapshot_dicts),
                 )
             else:
-                listings = ebay_client.search_listings(query)
+                category_ids = item.get("ebay_category_id")
+                listings = ebay_client.search_listings(
+                    query, category_ids=category_ids,
+                )
                 snapshot_dicts = [snapshot_to_dict(s) for s in listings]
+                snapshot_dicts = filter_outliers(engine, item_id, snapshot_dicts)
                 count = insert_snapshots(engine, item_id, snapshot_dicts)
                 total_snapshots += count
                 processed += 1
