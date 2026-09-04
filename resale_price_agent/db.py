@@ -44,6 +44,7 @@ tracked_items = Table(
     Column("is_seeded", Boolean, nullable=False, default=False),
     Column("owner", String, nullable=True, default=None),
     Column("ebay_category_id", String, nullable=True, default=None),
+    Column("category", String, nullable=True, default=None),
     Column("status", String, nullable=False, default="collecting"),
     Column("created_at", DateTime, nullable=False),
     UniqueConstraint("normalized_query", name="uq_tracked_items_normalized_query"),
@@ -291,6 +292,7 @@ def get_or_create_tracked_item(
 def seed_tracked_item(
     engine, raw_query: str, display_name: str | None = None,
     ebay_category_id: str | None = None,
+    category: str | None = None,
 ) -> tuple[dict, bool]:
     """Create or retrieve a seeded tracked item.
 
@@ -318,6 +320,8 @@ def seed_tracked_item(
             updates["is_seeded"] = True
         if ebay_category_id and row_dict.get("ebay_category_id") != ebay_category_id:
             updates["ebay_category_id"] = ebay_category_id
+        if category and row_dict.get("category") != category:
+            updates["category"] = category
         if updates:
             with engine.begin() as conn:
                 conn.execute(
@@ -336,6 +340,7 @@ def seed_tracked_item(
                 display_name=(display_name or raw_query).strip(),
                 is_seeded=True,
                 ebay_category_id=ebay_category_id,
+                category=category,
                 status="collecting",
                 created_at=datetime.now(timezone.utc),
             )

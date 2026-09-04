@@ -22,9 +22,16 @@ function actionClass(action) {
   return 'action--skip';
 }
 
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'sealed', label: 'Sealed' },
+  { key: 'graded', label: 'Graded Singles' },
+];
+
 export default function TrendingGrid() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
 
   useEffect(() => {
     getTrending()
@@ -36,19 +43,34 @@ export default function TrendingGrid() {
   if (loading) {
     return (
       <div className="trending">
-        <h2 className="trending__title">Trending Items</h2>
-        <div className="trending__loading">Loading trending items...</div>
+        <h2 className="trending__title">Trending Cards</h2>
+        <div className="trending__loading">Loading trending cards...</div>
       </div>
     );
   }
 
   if (items.length === 0) return null;
 
+  const filtered = filter === 'all'
+    ? items
+    : items.filter((e) => e.tracked_item.category === filter);
+
   return (
     <div className="trending">
-      <h2 className="trending__title">Trending Items</h2>
+      <h2 className="trending__title">Trending Cards</h2>
+      <div className="condition-tabs" style={{ marginBottom: 16 }}>
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            className={`condition-tabs__tab${f.key === filter ? ' condition-tabs__tab--active' : ''}`}
+            onClick={() => setFilter(f.key)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       <div className="trending__grid">
-        {items.map((entry) => {
+        {filtered.map((entry) => {
           const item = entry.tracked_item;
           const dec = entry.recommendation || entry.latest_decision;
           const label = actionLabel(dec);

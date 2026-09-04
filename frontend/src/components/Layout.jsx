@@ -6,12 +6,12 @@ export default function Layout({ children }) {
       <header className="app-header">
         <Link to="/" className="logo-link">
           <span className="logo-icon">&#9650;</span>
-          <span className="logo-text">Resale Tracker</span>
+          <span className="logo-text">PokéTracker</span>
         </Link>
       </header>
       <main className="app-main">{children}</main>
       <footer className="app-footer">
-        <p>Real-time eBay price tracking and buy/wait/skip recommendations.</p>
+        <p>Real-time Pokemon card price tracking and buy/wait/skip recommendations.</p>
       </footer>
     </div>
   );

@@ -61,25 +61,14 @@ class TestSeedAll:
             assert "category" in item, f"Missing category: {item['query']}"
             assert item["category"].strip(), f"Empty category: {item['query']}"
 
-    def test_category_diversity(self):
-        """Seed list should span at least 8 distinct categories."""
-        assert len(CATEGORIES) >= 8
+    def test_has_both_categories(self):
+        """Seed list should have both sealed and graded categories."""
+        assert "sealed" in CATEGORIES
+        assert "graded" in CATEGORIES
 
-    def test_spans_expected_categories(self):
-        """Verify key category types are represented."""
-        queries = [e["query"].lower() for e in SEED_ITEMS]
-        checks = {
-            "sneakers": ("jordan", "nike", "dunk", "new balance", "yeezy", "adidas"),
-            "gaming": ("playstation", "switch", "xbox", "steam deck"),
-            "phones": ("iphone", "galaxy", "pixel", "ipad"),
-            "audio": ("airpods", "sony wh", "bose", "sennheiser"),
-            "trading_cards": ("pokemon", "topps", "panini", "magic the gathering", "yu-gi-oh"),
-            "lego": ("lego",),
-            "watches": ("casio", "seiko", "omega", "garmin", "apple watch"),
-            "cameras": ("contax", "canon ae", "fujifilm", "gopro", "polaroid"),
-            "streetwear": ("supreme", "fear of god", "stussy", "north face"),
-            "home": ("dyson", "stanley", "vitamix", "le creuset", "yeti"),
-        }
-        for label, keywords in checks.items():
-            found = any(kw in q for q in queries for kw in keywords)
-            assert found, f"Seed list missing {label} category"
+    def test_all_items_are_pokemon(self):
+        """Every seed item query should reference Pokemon."""
+        for item in SEED_ITEMS:
+            assert "pokemon" in item["query"].lower(), (
+                f"Non-Pokemon item found: {item['query']}"
+            )

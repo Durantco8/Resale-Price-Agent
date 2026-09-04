@@ -22,12 +22,12 @@ from resale_price_agent.db import get_engine, get_tracked_item, insert_snapshots
 random.seed(42)  # reproducible
 
 SELLERS = [
-    ("sneaker_vault_pdx", 4521, "Portland, OR, US"),
-    ("kicks_n_more", 892, "Los Angeles, CA, US"),
-    ("sole_collector_atl", 2103, "Atlanta, GA, US"),
-    ("j4_deals", 337, "Houston, TX, US"),
-    ("stadium_goods_ny", 15420, "New York, NY, US"),
-    ("retro_heat_chi", 1876, "Chicago, IL, US"),
+    ("card_vault_pdx", 4521, "Portland, OR, US"),
+    ("pokemon_collector_la", 892, "Los Angeles, CA, US"),
+    ("tcg_deals_atl", 2103, "Atlanta, GA, US"),
+    ("poke_finds", 337, "Houston, TX, US"),
+    ("graded_gems_ny", 15420, "New York, NY, US"),
+    ("rare_cards_chi", 1876, "Chicago, IL, US"),
 ]
 
 
@@ -36,16 +36,16 @@ def _make_snapshot(day_offset, base_price, idx):
     seller = random.choice(SELLERS)
     noise = random.uniform(-8, 8)
     price = round(base_price + noise, 2)
-    shipping = random.choice([0.0, 9.95, 14.95, None])
+    shipping = random.choice([0.0, 4.99, 9.95, None])
     condition = random.choice([
-        "New with box", "New with box", "New with box",  # most common
-        "New without box", "Pre-owned - Excellent",
+        "New", "New", "New",  # most common for sealed
+        "Pre-owned - Excellent", "Pre-owned - Good",
     ])
     fmt = random.choice(["FIXED_PRICE", "FIXED_PRICE", "FIXED_PRICE", "AUCTION"])
 
     return {
         "ebay_item_id": f"v1|fake{day_offset:02d}{idx:02d}|0",
-        "title": f"Jordan 4 Retro Military Black - Size 10 {'DS' if 'New' in condition else ''}".strip(),
+        "title": f"Pokemon Evolving Skies Booster Box {'Sealed' if 'New' in condition else ''}".strip(),
         "price": price,
         "currency": "USD",
         "condition": condition,
@@ -62,7 +62,7 @@ def seed(engine, item_id):
     item = get_tracked_item(engine, item_id)
     if not item:
         print(f"Error: tracked item #{item_id} not found. Add one first:")
-        print(f'  python manage_items.py add "Jordan 4 Retro Military Black size 10" --target-price 200')
+        print(f'  python manage_items.py add "Pokemon Evolving Skies Booster Box"')
         return
 
     print(f"Seeding fake data for item #{item_id}: \"{item['search_query']}\"")
@@ -91,10 +91,10 @@ def seed(engine, item_id):
     today_snaps = [
         {
             "ebay_item_id": "v1|drop01|0",
-            "title": "Jordan 4 Retro Military Black - Size 10 DS",
+            "title": "Pokemon Evolving Skies Booster Box Sealed",
             "price": 192.00,
             "currency": "USD",
-            "condition": "New with box",
+            "condition": "New",
             "seller_feedback_score": 2103,
             "shipping_cost": 0.0,
             "item_location": "Atlanta, GA, US",
@@ -104,12 +104,12 @@ def seed(engine, item_id):
         },
         {
             "ebay_item_id": "v1|drop02|0",
-            "title": "Air Jordan 4 Military Black Mens 10 VNDS",
+            "title": "Pokemon Evolving Skies Booster Box Factory Sealed",
             "price": 189.99,
             "currency": "USD",
-            "condition": "New with box",
+            "condition": "New",
             "seller_feedback_score": 15420,
-            "shipping_cost": 14.95,
+            "shipping_cost": 4.99,
             "item_location": "New York, NY, US",
             "buying_format": "FIXED_PRICE",
             "item_url": "https://www.ebay.com/itm/drop02",
@@ -117,10 +117,10 @@ def seed(engine, item_id):
         },
         {
             "ebay_item_id": "v1|drop03|0",
-            "title": "Jordan 4 Military Black Size 10 Brand New",
+            "title": "Pokemon Evolving Skies Booster Box New",
             "price": 208.50,
             "currency": "USD",
-            "condition": "New with box",
+            "condition": "New",
             "seller_feedback_score": 892,
             "shipping_cost": 9.95,
             "item_location": "Los Angeles, CA, US",
@@ -137,7 +137,7 @@ def seed(engine, item_id):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Seed fake listing data for testing.")
+    parser = argparse.ArgumentParser(description="Seed fake Pokemon card listing data for testing.")
     parser.add_argument("--item-id", type=int, default=1, help="Tracked item ID to seed (default: 1)")
     args = parser.parse_args()
 
