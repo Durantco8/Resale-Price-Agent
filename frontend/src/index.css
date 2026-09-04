@@ -676,6 +676,77 @@ p {
 }
 
 /* ============================================
+   Condition Tabs
+   ============================================ */
+.condition-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0;
+}
+
+.condition-tabs__tab {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.condition-tabs__tab:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.condition-tabs__tab--active {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-color: var(--color-accent);
+}
+
+.condition-tabs__tab--active:hover {
+  background: var(--color-accent-hover);
+  color: var(--color-text-inverse);
+}
+
+/* ============================================
+   Listing Labels (Good Buy / Fair / Overpriced)
+   ============================================ */
+.listing-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.listing-label--good {
+  background: var(--color-green-bg);
+  color: var(--color-green);
+}
+
+.listing-label--fair {
+  background: var(--color-accent-bg);
+  color: var(--color-text-muted);
+}
+
+.listing-label--overpriced {
+  background: var(--color-red-bg);
+  color: var(--color-red);
+}
+
+.listing-label__pct {
+  font-weight: 400;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* ============================================
    Price Chart
    ============================================ */
 .price-chart {

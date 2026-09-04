@@ -55,6 +55,58 @@ def compute_signals(
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=window_days)
     snapshots = get_snapshots_for_item(engine, tracked_item_id, since=since)
+    return _compute_signals_from_snapshots(
+        snapshots, window_days=window_days,
+        min_snapshots=min_snapshots, min_poll_batches=min_poll_batches,
+    )
+
+
+def compute_signals_by_condition(
+    engine,
+    tracked_item_id: int,
+    window_days: int = WINDOW_DAYS,
+    min_snapshots: int = MIN_SNAPSHOTS,
+    min_poll_batches: int = MIN_POLL_BATCHES,
+) -> dict[str, TrendSignals]:
+    """Compute TrendSignals per condition tier plus an 'All' aggregate.
+
+    Single DB fetch — partitions in-memory by normalized condition.
+    """
+    from resale_price_agent.conditions import normalize_condition
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=window_days)
+    snapshots = get_snapshots_for_item(engine, tracked_item_id, since=since)
+
+    # Partition by condition tier
+    groups: dict[str, list[dict]] = {}
+    for snap in snapshots:
+        tier = normalize_condition(snap.get("condition"))
+        groups.setdefault(tier, []).append(snap)
+
+    result = {
+        "All": _compute_signals_from_snapshots(
+            snapshots, window_days=window_days,
+            min_snapshots=min_snapshots, min_poll_batches=min_poll_batches,
+        ),
+    }
+    for tier, tier_snapshots in groups.items():
+        result[tier] = _compute_signals_from_snapshots(
+            tier_snapshots, window_days=window_days,
+            min_snapshots=min_snapshots, min_poll_batches=min_poll_batches,
+        )
+
+    return result
+
+
+def _compute_signals_from_snapshots(
+    snapshots: list[dict],
+    window_days: int = WINDOW_DAYS,
+    min_snapshots: int = MIN_SNAPSHOTS,
+    min_poll_batches: int = MIN_POLL_BATCHES,
+) -> TrendSignals:
+    """Core signal computation from a pre-fetched list of snapshot dicts."""
+    now = datetime.now(timezone.utc)
 
     if not snapshots:
         return TrendSignals(

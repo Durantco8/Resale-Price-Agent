@@ -8,16 +8,20 @@ import RecentListings from '../components/RecentListings';
 import RecommendationBanner from '../components/RecommendationBanner';
 import CollectingState from '../components/CollectingState';
 import NotifyForm from '../components/NotifyForm';
+import ConditionTabs from '../components/ConditionTabs';
+import { normalizeCondition } from '../utils/conditions';
 
 export default function ItemPage() {
   const { id } = useParams();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [activeCondition, setActiveCondition] = useState('All');
 
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setActiveCondition('All');
     getItem(id)
       .then(setData)
       .catch((err) => setError(err.message))
@@ -44,7 +48,25 @@ export default function ItemPage() {
     );
   }
 
-  const { tracked_item, snapshots, status, snapshot_count, recommendation, signals } = data;
+  const {
+    tracked_item, snapshots, status, snapshot_count,
+    recommendation, signals, signals_by_condition, listing_labels,
+  } = data;
+
+  // Derive condition tiers present (excluding "All" — that's added by ConditionTabs)
+  const conditionTiers = signals_by_condition
+    ? Object.keys(signals_by_condition).filter((k) => k !== 'All').sort()
+    : [];
+
+  // Filter snapshots by active condition tab
+  const filteredSnapshots = activeCondition === 'All'
+    ? snapshots
+    : snapshots.filter((s) => normalizeCondition(s.condition) === activeCondition);
+
+  // Pick the right signals for the active tab
+  const activeSignals = signals_by_condition && signals_by_condition[activeCondition]
+    ? signals_by_condition[activeCondition]
+    : signals;
 
   return (
     <div className="item-page">
@@ -60,9 +82,14 @@ export default function ItemPage() {
       ) : (
         <>
           <RecommendationBanner recommendation={recommendation} />
-          <ListingStats signals={signals} />
-          <RecentListings snapshots={snapshots} />
-          <PriceChart snapshots={snapshots} />
+          <ConditionTabs
+            conditions={conditionTiers}
+            active={activeCondition}
+            onChange={setActiveCondition}
+          />
+          <ListingStats signals={activeSignals} conditionLabel={activeCondition} />
+          <RecentListings snapshots={filteredSnapshots} labels={listing_labels} />
+          <PriceChart snapshots={filteredSnapshots} />
         </>
       )}
 

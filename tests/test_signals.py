@@ -6,7 +6,12 @@ import pytest
 from sqlalchemy import create_engine
 
 from resale_price_agent.db import get_or_create_tracked_item, insert_snapshots, metadata
-from resale_price_agent.signals import TrendSignals, compute_signals
+from resale_price_agent.signals import (
+    TrendSignals,
+    _compute_signals_from_snapshots,
+    compute_signals,
+    compute_signals_by_condition,
+)
 
 
 @pytest.fixture
@@ -16,11 +21,12 @@ def engine():
     return eng
 
 
-def _snap(ebay_id, price, hours_ago=0):
+def _snap(ebay_id, price, hours_ago=0, condition=""):
     return {
         "ebay_item_id": ebay_id,
         "title": "Test",
         "price": price,
+        "condition": condition,
         "snapshot_time": datetime.now(timezone.utc) - timedelta(hours=hours_ago),
     }
 
@@ -36,12 +42,12 @@ def _seed(engine, item_id, price_hour_pairs):
         )
 
 
-def _insert_batch(engine, item_id, prices, hours_ago, batch_id):
+def _insert_batch(engine, item_id, prices, hours_ago, batch_id, condition=""):
     insert_snapshots(
         engine,
         item_id,
         [
-            _snap(f"{batch_id}-{i}", price, hours_ago=hours_ago)
+            _snap(f"{batch_id}-{i}", price, hours_ago=hours_ago, condition=condition)
             for i, price in enumerate(prices)
         ],
         poll_batch_id=batch_id,
@@ -323,3 +329,77 @@ class TestToDict:
         assert d["sufficient_data"] is False
         assert d["avg_price"] is None
         assert d["price_trend"] is None
+
+
+# ---------------------------------------------------------------------------
+# Condition-segmented signals
+# ---------------------------------------------------------------------------
+
+class TestConditionSignals:
+    def test_compute_from_snapshots_matches_compute_signals(self, engine):
+        """_compute_signals_from_snapshots with fetched data matches compute_signals."""
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        _insert_batch(engine, item_id, [100.0, 110.0, 120.0], 48, "b1")
+        _insert_batch(engine, item_id, [130.0, 140.0, 150.0], 2, "b2")
+
+        full = compute_signals(engine, item_id)
+
+        from resale_price_agent.db import get_snapshots_for_item
+        snaps = get_snapshots_for_item(engine, item_id)
+        manual = _compute_signals_from_snapshots(snaps)
+
+        assert manual.avg_price == full.avg_price
+        assert manual.price_trend == full.price_trend
+        assert manual.snapshot_count == full.snapshot_count
+        assert manual.poll_batch_count == full.poll_batch_count
+
+    def test_by_condition_returns_all_key(self, engine):
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        _insert_batch(engine, item_id, [200.0] * 3, 48, "b1", condition="New")
+        _insert_batch(engine, item_id, [200.0] * 3, 2, "b2", condition="New")
+
+        result = compute_signals_by_condition(engine, item_id)
+
+        assert "All" in result
+        assert "New" in result
+        assert result["All"].sufficient_data is True
+
+    def test_by_condition_separates_tiers(self, engine):
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        # New items: $300
+        _insert_batch(engine, item_id, [300.0] * 3, 48, "b1-new", condition="New with box")
+        _insert_batch(engine, item_id, [300.0] * 3, 2, "b2-new", condition="New with box")
+        # Pre-owned: $150
+        _insert_batch(engine, item_id, [150.0] * 3, 48, "b1-used", condition="Used")
+        _insert_batch(engine, item_id, [150.0] * 3, 2, "b2-used", condition="Used")
+
+        result = compute_signals_by_condition(engine, item_id)
+
+        assert "New" in result
+        assert "Pre-owned - Good" in result
+        assert result["New"].avg_price == 300.0
+        assert result["Pre-owned - Good"].avg_price == 150.0
+        # All should average both
+        assert result["All"].avg_price == 225.0
+
+    def test_sparse_tier_insufficient_data(self, engine):
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        # Only 2 snapshots for "New" — below MIN_SNAPSHOTS
+        _insert_batch(engine, item_id, [300.0, 310.0], 2, "b1", condition="New")
+
+        result = compute_signals_by_condition(engine, item_id)
+
+        assert result["New"].sufficient_data is False
+
+    def test_all_matches_aggregate_regression(self, engine):
+        """'All' key must match existing compute_signals behavior."""
+        item_id = get_or_create_tracked_item(engine, "Jordan 4")[0]["id"]
+        _insert_batch(engine, item_id, [100.0, 200.0, 300.0], 48, "b1", condition="New")
+        _insert_batch(engine, item_id, [110.0, 210.0, 310.0], 2, "b2", condition="Used")
+
+        aggregate = compute_signals(engine, item_id)
+        by_cond = compute_signals_by_condition(engine, item_id)
+
+        assert by_cond["All"].avg_price == aggregate.avg_price
+        assert by_cond["All"].snapshot_count == aggregate.snapshot_count
+        assert by_cond["All"].price_trend == aggregate.price_trend

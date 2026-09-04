@@ -285,7 +285,7 @@ class TestRateLimiting:
 # Signals in /api/items/<id>
 # ---------------------------------------------------------------------------
 
-def _insert_batch(engine, item_id, batch_id, prices, time_offset_hours=0):
+def _insert_batch(engine, item_id, batch_id, prices, time_offset_hours=0, condition=""):
     """Insert a batch of snapshots with distinct eBay item IDs."""
     t = datetime.now(timezone.utc) - timedelta(hours=time_offset_hours)
     rows = [
@@ -293,6 +293,7 @@ def _insert_batch(engine, item_id, batch_id, prices, time_offset_hours=0):
             "ebay_item_id": f"v1|{batch_id}{i:04d}|0",
             "title": "Test Item",
             "price": p,
+            "condition": condition,
             "poll_batch_id": batch_id,
             "snapshot_time": t,
         }
@@ -382,3 +383,47 @@ class TestTimestampSerialization:
         assert created.endswith("Z"), (
             f"Expected UTC suffix, got: {created}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Condition-segmented signals in /api/items/<id>
+# ---------------------------------------------------------------------------
+
+class TestItemDetailConditions:
+    def test_response_includes_signals_by_condition(self, client, engine):
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _insert_batch(engine, item["id"], "ba", [200, 210, 190], 48, condition="New")
+        _insert_batch(engine, item["id"], "bb", [195, 205, 185], 0, condition="New")
+
+        resp = client.get(f"/api/items/{item['id']}")
+        data = resp.get_json()
+
+        assert "signals_by_condition" in data
+        assert "All" in data["signals_by_condition"]
+        assert "New" in data["signals_by_condition"]
+
+    def test_all_matches_signals_key(self, client, engine):
+        """signals_by_condition['All'] must match the top-level signals key."""
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _insert_batch(engine, item["id"], "ba", [200, 210], 48, condition="New")
+        _insert_batch(engine, item["id"], "bb", [195, 205], 0, condition="New")
+
+        resp = client.get(f"/api/items/{item['id']}")
+        data = resp.get_json()
+
+        for key in ("avg_price", "snapshot_count", "sufficient_data"):
+            assert data["signals"][key] == data["signals_by_condition"]["All"][key]
+
+    def test_response_includes_listing_labels(self, client, engine):
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _insert_batch(engine, item["id"], "ba", [200, 210, 190], 48, condition="New")
+        _insert_batch(engine, item["id"], "bb", [150, 250, 200], 0, condition="New")
+
+        resp = client.get(f"/api/items/{item['id']}")
+        data = resp.get_json()
+
+        assert "listing_labels" in data
+        assert isinstance(data["listing_labels"], list)
+        # With sufficient data, at least some labels should be generated
+        labels = {l["label"] for l in data["listing_labels"]}
+        assert labels.issubset({"Good Buy", "Fair Price", "Overpriced"})

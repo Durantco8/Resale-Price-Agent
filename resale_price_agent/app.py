@@ -23,9 +23,10 @@ from resale_price_agent.db import (
     metadata,
     unsubscribe_by_token,
 )
+from resale_price_agent.conditions import label_listings
 from resale_price_agent.recommendation import get_latest_deterministic_recommendation
 from resale_price_agent.search import search
-from resale_price_agent.signals import compute_signals
+from resale_price_agent.signals import compute_signals, compute_signals_by_condition
 
 
 def create_app(config=None):
@@ -164,7 +165,8 @@ def create_app(config=None):
         item_snapshots = get_snapshots_for_item(engine, item_id)
         item_decisions = get_decisions_for_item(engine, item_id)
         rec = get_latest_deterministic_recommendation(engine, item_id)
-        signals = compute_signals(engine, item_id)
+        signals_by_cond = compute_signals_by_condition(engine, item_id)
+        listing_labels = label_listings(item_snapshots, signals_by_cond)
 
         return jsonify({
             "tracked_item": _serialize_item(item),
@@ -173,7 +175,11 @@ def create_app(config=None):
             "snapshots": [_serialize_row(s) for s in item_snapshots],
             "decisions": [_serialize_row(d) for d in item_decisions],
             "recommendation": _serialize_row(rec) if rec else None,
-            "signals": signals.to_dict(),
+            "signals": signals_by_cond["All"].to_dict(),
+            "signals_by_condition": {
+                k: v.to_dict() for k, v in signals_by_cond.items()
+            },
+            "listing_labels": listing_labels,
         })
 
     return app
