@@ -1,6 +1,6 @@
 # Resale Price Agent — Progress Summary
 
-*Last updated: Sep 3, 2026 (Session 6, Phase 2 complete). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
+*Last updated: Sep 3, 2026 (Session 8, clickable price-history listings). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
 
 **Project path:** `/Users/durantco/Documents/RESUME PROJECTS/Resale Price Agent`
 **GitHub:** `Durantco8/Resale-Price-Agent`
@@ -160,10 +160,10 @@ Three reset-specific tests cover confirmation refusal/no mutation, exact preview
 
 ---
 
-## 10. Deferred / Queued Ideas (Not Yet Built)
+## 10. Deferred / Queued Ideas and Status
 
 ### a) Clickable price-chart data points
-CD wants each point on `PriceChart` to be clickable, opening that snapshot's real eBay listing (`item_url`) in a new tab — same pattern as `RecentListings`. **Status: queued, ready to start** now that the underlying data is verified clean (post Section 7 cleanup).
+**Completed in Session 8.** Each `PriceChart` point opens that snapshot's real eBay listing (`item_url`) in a safe new tab. See the Session 8 implementation notes in Section 14.
 
 ### b) Reusable wipe/reset concept — mechanism built, no reset pending
 The repaired `reset_data.py` now implements the reusable safety valve: preview exact counts by running without arguments, then execute only with the explicit `--confirm` flag. **No reset was executed while repairing or testing it.** Any future wipe still requires separate, explicit approval after reviewing the live preview.
@@ -191,7 +191,7 @@ This backlog is no longer a core-product task. A similar queue may be useful lat
 
 - **SQLite → Postgres migration / Render deployment** — blocked on the Section 8 correction. This is now the most significant open architectural item.
 - **A dedicated personal "test item"** for CD to watch agent behavior (notifications, trend accumulation) over several days once things are stable.
-- **Public alert subscriptions** — `process_alerts()` path exists and is tested, but the `alerts` table is empty; no real users yet since the site isn't public-facing.
+- **Public alert subscriptions** — `process_alerts()` exists and is tested. The local `alerts` table now contains 2 subscriptions created while using the site, but the site is not deployed and there is no real public usage yet.
 - **One final controlled wipe before launch** (Section 10b concept) — the mechanism is ready, but do not run it without a separate explicit approval after reviewing a fresh preview.
 
 ---
@@ -323,12 +323,59 @@ In `poll_all_items()`, the deterministic recommendation runs after `compute_sign
 
 **Tests:** 306 passed (262 existing + 44 new), 1 non-blocking google.genai deprecation warning.
 
+### ListingStats unified on TrendSignals
+
+**Status: implemented, tested (Session 7).**
+
+Previously, `ListingStats.jsx` computed its own stats client-side (mean, raw min/max over all-time snapshots) — completely disconnected from the backend's `compute_signals()` which uses 14-day outlier-filtered, batch-aware computation. These would diverge as history accumulates.
+
+**Fix:** `compute_signals()` is now called live in `/api/items/<id>`, returning a `signals` dict with all 22 TrendSignals fields. `ListingStats.jsx` is now a pure display component — no client-side math.
+
+| Old label | New label | Source |
+|-----------|-----------|--------|
+| Average (mean of all snapshots) | Median | `signals.latest_batch_median` |
+| Low (raw min) | 25th Pct | `signals.price_p25` |
+| High (raw max) | 75th Pct | `signals.price_p75` |
+| Listings (all-time count) | Listings | `signals.latest_batch_listing_count` |
+
+Secondary row currently labels `signals.min_price` / `signals.max_price` as All-Time Low / All-Time High (only when `sufficient_data` is true). Those signals are actually computed over the 14-day signal window, so the labels are a known UI wording mismatch rather than true all-time statistics. When `sufficient_data` is false, a "Collecting data..." message displays instead of stats.
+
+#### Files changed
+
+- `resale_price_agent/app.py` — import `compute_signals`, call in `api_item_detail()`, add `signals` to response
+- `frontend/src/components/ListingStats.jsx` — rewritten: receives `signals` prop, displays backend-computed values
+- `frontend/src/pages/ItemPage.jsx` — passes `signals` instead of `snapshots` to `ListingStats`
+- `frontend/src/index.css` — styles for secondary stat cards and collecting-data state
+- `tests/test_app.py` — 3 new tests: signals present, signals match `compute_signals()`, signals present with insufficient data
+
+**Tests:** 309 passed (306 existing + 3 new), 1 non-blocking google.genai deprecation warning.
+
+### Clickable price-history listings
+
+**Status: implemented and tested (Session 8).**
+
+`PriceChart.jsx` now preserves each snapshot's listing metadata in its chart data and renders linked SVG dots. Clicking a point opens that exact stored eBay URL in a safe new tab. Points without a URL remain visible but are muted and non-clickable; historical links are allowed to open normally because eBay provides the authoritative ended/expired-listing state.
+
+The custom hover tooltip shows title, price, shipping, condition, and the full observation timestamp, with fallbacks for missing optional data. The graph retains its original categorical, per-listing layout and date-only x-axis; only the individual dots and hover details changed.
+
+`priceChartUtils.js` contains the data and formatting helpers. `PriceChart.test.jsx` adds 6 tests covering chronological data mapping, metadata preservation, preservation of the original categorical date layout, safe linked dots, missing-URL dots, tooltip details, and fallback states. Vitest is now available through `npm test`.
+
+**Validation:** 6 frontend tests passed; frontend lint passed with one pre-existing `ItemPage.jsx` effect warning; production build passed with the existing bundle-size advisory. The Python suite remains at 309 passed with one non-blocking Google GenAI deprecation warning.
+
 ### Current cautions / unresolved context
 
-- All 76 items currently have only 1 poll batch (legacy data). Every item will produce `WAIT confidence=0.20` until additional polls run and items accumulate ≥2 batches.
+- **Verified live SQLite state at the end of Session 8:** 76 tracked items, 6,581 snapshots, 394 decisions, 2 alert subscriptions, and 152 total poll batches. Every item has 2 poll batches; 74 are active and 2 remain collecting.
+- All 76 items now have a deterministic recommendation. Latest actions are 2 `BUY`, 68 `WAIT`, and 6 `SKIP`. The two low-volume collecting items remain insufficient for a mature recommendation.
+- Successful Gemini reasoning exists for 20 items. Gemini remains quota-limited, but this does not block snapshot collection or deterministic recommendations.
 - The `active` status threshold is still row-count based (≥5 snapshots), not batch-maturity based. The deterministic engine's Gate 0 (`sufficient_data`) handles this at the recommendation level.
 - `tracked_items` still has no `target_price` column even though price-drop code can accept a target price; not currently configurable from the live schema.
-- `/api/trending` currently asks for the latest decision of any event type. The new `get_latest_deterministic_recommendation()` query is available but not yet wired into the API/UI.
+- `/api/trending` now returns `recommendation` (deterministic) alongside `latest_decision` (legacy LLM). Frontend `TrendingGrid` prefers `recommendation` when available.
 - Current `buy_now` public alerts and owner notifications still depend on `LLMDecision`; notification migration to the deterministic engine is intentionally later work.
 - Gemini remains in place for eventual optional `llm_analysis`. It cannot override the deterministic recommendation.
-- Separate known issues remain: sneaker counterfeit detection, SQLite-to-hosted-Postgres/Render deployment, and clickable chart points.
+- Separate known issues remain: sneaker counterfeit detection and SQLite-to-hosted-Postgres/Render deployment.
+
+### Working-tree handoff
+
+- Sessions 7 and 8 are present in the local working tree but are not yet committed. This includes the item-detail TrendSignals integration, ListingStats rewrite, clickable price-chart dots/tooltips, frontend Vitest setup, and their tests.
+- The old standalone spec file remains marked for deletion. `.claude/` and `.DS_Store` are untracked; review repository hygiene before committing rather than including them automatically.
+- Latest validation: 309 Python tests passed with one third-party Google GenAI deprecation warning; 6 frontend tests passed; frontend lint passed with one pre-existing `ItemPage.jsx` effect warning; production frontend build passed with the existing bundle-size advisory.
