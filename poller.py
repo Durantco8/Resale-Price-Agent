@@ -55,15 +55,14 @@ def main():
     # Purge old non-Pokemon items (one-time cleanup)
     seed_queries = {normalize_query(e["query"]) for e in SEED_ITEMS}
     with engine.begin() as conn:
-        rows = conn.execute(text("SELECT id, normalized_query, display_name FROM tracked_items")).fetchall()
+        rows = conn.execute(text("SELECT id, normalized_query FROM tracked_items")).fetchall()
         to_delete = [r for r in rows if r[1] not in seed_queries]
         for row in to_delete:
-            for table in ("recommendations", "decisions", "price_snapshots", "alerts"):
-                try:
-                    conn.execute(text(f"DELETE FROM {table} WHERE tracked_item_id = :id"), {"id": row[0]})
-                except Exception:
-                    pass
-            conn.execute(text("DELETE FROM tracked_items WHERE id = :id"), {"id": row[0]})
+            item_id = row[0]
+            conn.execute(text("DELETE FROM decisions WHERE tracked_item_id = :id"), {"id": item_id})
+            conn.execute(text("DELETE FROM snapshots WHERE tracked_item_id = :id"), {"id": item_id})
+            conn.execute(text("DELETE FROM alerts WHERE tracked_item_id = :id"), {"id": item_id})
+            conn.execute(text("DELETE FROM tracked_items WHERE id = :id"), {"id": item_id})
         if to_delete:
             logging.info("Purged %d old item(s) not in seed list", len(to_delete))
 
