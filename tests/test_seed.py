@@ -62,9 +62,9 @@ class TestSeedAll:
             assert item["category"].strip(), f"Empty category: {item['query']}"
 
     def test_has_both_categories(self):
-        """Seed list should have both sealed and graded categories."""
-        assert "sealed" in CATEGORIES
+        """Seed list should have both graded and raw categories."""
         assert "graded" in CATEGORIES
+        assert "raw" in CATEGORIES
 
     def test_all_items_are_pokemon(self):
         """Every seed item query should reference Pokemon."""

@@ -24,8 +24,8 @@ function actionClass(action) {
 
 const FILTERS = [
   { key: 'all', label: 'All' },
-  { key: 'sealed', label: 'Sealed' },
-  { key: 'graded', label: 'Graded Singles' },
+  { key: 'graded', label: 'Graded' },
+  { key: 'raw', label: 'Raw' },
 ];
 
 export default function TrendingGrid() {
