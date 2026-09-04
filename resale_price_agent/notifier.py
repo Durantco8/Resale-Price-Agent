@@ -105,7 +105,7 @@ def notify(
     # Decide whether this decision is notification-worthy
     if event_type == "price_drop_alert":
         subject, body = _format_price_drop_email(item_query, decision)
-    elif event_type == "llm_reasoning" and action == "buy_now":
+    elif event_type == "deterministic_recommendation" and action == "buy_now":
         subject, body = _format_buy_now_email(item_query, decision)
     else:
         return False

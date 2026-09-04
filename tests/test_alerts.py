@@ -9,7 +9,7 @@ from resale_price_agent.db import (
     get_or_create_tracked_item,
     unsubscribe_by_token,
 )
-from resale_price_agent.llm_reasoning import LLMDecision
+from resale_price_agent.recommendation import Recommendation
 
 
 # ---------------------------------------------------------------------------
@@ -22,11 +22,10 @@ def _snap(price=200.0, **kw):
     return defaults
 
 
-def _decision(action="wait", confidence=0.5, reasoning="Holding.",
-              skipped=False, skip_reason=None):
-    return LLMDecision(
+def _rec(action="wait", confidence=0.5, reasoning="Holding."):
+    return Recommendation(
         action=action, confidence=confidence, reasoning=reasoning,
-        skipped=skipped, skip_reason=skip_reason,
+        ruleset_version="v1.0", signals_snapshot={},
     )
 
 
@@ -105,31 +104,25 @@ class TestPriceThreshold:
 class TestBuyNowCondition:
     def test_fires_on_buy_now(self):
         alerts = [_alert_dict(condition="buy_now")]
-        decision = _decision(action="buy_now", confidence=0.9, reasoning="Great deal.")
-        matched = match_alerts(alerts, [_snap()], decision)
+        rec = _rec(action="buy_now", confidence=0.9, reasoning="Great deal.")
+        matched = match_alerts(alerts, [_snap()], rec)
         assert len(matched) == 1
         assert "Buy now" in matched[0][1]
         assert "90%" in matched[0][1]
 
     def test_does_not_fire_on_wait(self):
         alerts = [_alert_dict(condition="buy_now")]
-        decision = _decision(action="wait")
-        matched = match_alerts(alerts, [_snap()], decision)
+        rec = _rec(action="wait")
+        matched = match_alerts(alerts, [_snap()], rec)
         assert len(matched) == 0
 
     def test_does_not_fire_on_skip(self):
         alerts = [_alert_dict(condition="buy_now")]
-        decision = _decision(action="skip")
-        matched = match_alerts(alerts, [_snap()], decision)
+        rec = _rec(action="skip")
+        matched = match_alerts(alerts, [_snap()], rec)
         assert len(matched) == 0
 
-    def test_does_not_fire_on_skipped_decision(self):
-        alerts = [_alert_dict(condition="buy_now")]
-        decision = _decision(action="skip", skipped=True, skip_reason="insufficient_data")
-        matched = match_alerts(alerts, [_snap()], decision)
-        assert len(matched) == 0
-
-    def test_does_not_fire_with_no_decision(self):
+    def test_does_not_fire_with_no_recommendation(self):
         alerts = [_alert_dict(condition="buy_now")]
         matched = match_alerts(alerts, [_snap()], None)
         assert len(matched) == 0
@@ -147,7 +140,7 @@ class TestMultipleAlerts:
             _alert_dict(condition="buy_now", email="e@f.com", alert_id=3),
         ]
         snaps = [_snap(price=185.0)]
-        decision = _decision(action="wait")
+        decision = _rec(action="wait")
 
         matched = match_alerts(alerts, snaps, decision)
 
@@ -162,7 +155,7 @@ class TestMultipleAlerts:
             _alert_dict(condition="buy_now", email="e@f.com", alert_id=3),
         ]
         snaps = [_snap(price=185.0)]
-        decision = _decision(action="buy_now", confidence=0.85)
+        decision = _rec(action="buy_now", confidence=0.85)
 
         matched = match_alerts(alerts, snaps, decision)
 
@@ -179,7 +172,7 @@ class TestMultipleAlerts:
 class TestUnknownCondition:
     def test_skipped_gracefully(self):
         alerts = [_alert_dict(condition="some_future_condition")]
-        matched = match_alerts(alerts, [_snap()], _decision())
+        matched = match_alerts(alerts, [_snap()], _rec())
         assert len(matched) == 0
 
     def test_malformed_price_below(self):

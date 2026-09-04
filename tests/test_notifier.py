@@ -43,7 +43,7 @@ def _buy_now_decision(**overrides):
     }
     d = {
         "id": 2,
-        "event_type": "llm_reasoning",
+        "event_type": "deterministic_recommendation",
         "action": "buy_now",
         "confidence": 0.85,
         "reasoning": "Prices falling with rising supply — good time to buy.",
@@ -115,7 +115,7 @@ class TestShouldNotSend:
             sent.append(True)
 
         result = notify(
-            "Jordan 4", {"event_type": "llm_reasoning", "action": "wait"},
+            "Jordan 4", {"event_type": "deterministic_recommendation", "action": "wait"},
             send_fn=fake_send, recipient="test@example.com",
         )
 
@@ -124,7 +124,7 @@ class TestShouldNotSend:
 
     def test_skip_decision_no_email(self):
         result = notify(
-            "Jordan 4", {"event_type": "llm_reasoning", "action": "skip"},
+            "Jordan 4", {"event_type": "deterministic_recommendation", "action": "skip"},
             send_fn=lambda *a: None, recipient="test@example.com",
         )
 

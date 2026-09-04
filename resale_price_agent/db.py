@@ -5,6 +5,7 @@ can inject an in-memory SQLite database.  Transactions are explicit via
 ``engine.begin()``.
 """
 
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -124,8 +125,19 @@ alerts = Table(
 # Engine helper
 # ---------------------------------------------------------------------------
 
-def get_engine(db_url: str = "sqlite:///resale_agent.db"):
-    engine = create_engine(db_url, echo=False)
+def _resolve_db_url(db_url: str | None = None) -> str:
+    """Resolve DB URL: explicit arg > DATABASE_URL env var > SQLite default."""
+    if db_url:
+        return db_url
+    url = os.environ.get("DATABASE_URL", "sqlite:///resale_agent.db")
+    # Render uses postgres:// but SQLAlchemy requires postgresql://
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
+def get_engine(db_url: str | None = None):
+    engine = create_engine(_resolve_db_url(db_url), echo=False)
     _migrate_schema(engine)
     metadata.create_all(engine)
     return engine

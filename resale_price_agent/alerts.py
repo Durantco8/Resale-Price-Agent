@@ -11,7 +11,7 @@ one-click unsubscribe link included in every email.
 import logging
 
 from resale_price_agent.db import get_active_alerts_for_item
-from resale_price_agent.llm_reasoning import LLMDecision
+from resale_price_agent.recommendation import Recommendation
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def _parse_price_below(condition: str) -> float | None:
 def match_alerts(
     alerts: list[dict],
     new_snapshots: list[dict],
-    llm_decision: LLMDecision | None,
+    recommendation: Recommendation | None,
 ) -> list[tuple[dict, str]]:
     """Return ``(alert, reason)`` pairs for alerts whose conditions are met.
 
@@ -60,14 +60,13 @@ def match_alerts(
         # --- buy_now ---
         if condition == "buy_now":
             if (
-                llm_decision is not None
-                and not llm_decision.skipped
-                and llm_decision.action == "buy_now"
+                recommendation is not None
+                and recommendation.action == "buy_now"
             ):
                 reason = (
                     f"Buy now recommendation "
-                    f"(confidence: {llm_decision.confidence:.0%}): "
-                    f"{llm_decision.reasoning}"
+                    f"(confidence: {recommendation.confidence:.0%}): "
+                    f"{recommendation.reasoning}"
                 )
                 matched.append((alert, reason))
             continue
@@ -144,7 +143,7 @@ def process_alerts(
     engine,
     tracked_item: dict,
     new_snapshots: list[dict],
-    llm_decision: LLMDecision | None,
+    recommendation: Recommendation | None,
     send_fn,
 ) -> int:
     """Check and send all matching alerts for a tracked item.
@@ -155,7 +154,7 @@ def process_alerts(
     if not active_alerts:
         return 0
 
-    matched = match_alerts(active_alerts, new_snapshots, llm_decision)
+    matched = match_alerts(active_alerts, new_snapshots, recommendation)
     if not matched:
         return 0
 

@@ -25,7 +25,11 @@ from resale_price_agent.ebay_client import ListingSnapshot
 from resale_price_agent.llm_reasoning import get_llm_decision
 from resale_price_agent.notifier import notify
 from resale_price_agent.price_drop import check_price_drops
-from resale_price_agent.recommendation import evaluate, record_recommendation
+from resale_price_agent.recommendation import (
+    evaluate,
+    get_latest_deterministic_recommendation,
+    record_recommendation,
+)
 from resale_price_agent.signals import compute_signals
 
 log = logging.getLogger(__name__)
@@ -209,21 +213,21 @@ def poll_all_items(
 
             # --- Signal computation + deterministic recommendation ---
             signals = compute_signals(engine, item_id)
+            rec = evaluate(signals)
             if not skip_ebay:
-                rec = evaluate(signals)
                 record_recommendation(engine, item_id, batch_id, rec)
 
-            # --- LLM decision ---
+            # --- LLM decision (stored for future use, not used for alerts) ---
             listing_summary = _build_listing_summary(snapshot_dicts)
             llm_kwargs = {"client": llm_client} if llm_client else {}
-            llm_result = get_llm_decision(
+            get_llm_decision(
                 engine, item_id, signals, listing_summary, **llm_kwargs,
             )
 
             # --- Public subscriber alerts (all items) ---
             if send_fn is not None:
                 sent = process_alerts(
-                    engine, item, snapshot_dicts, llm_result, send_fn,
+                    engine, item, snapshot_dicts, rec, send_fn,
                 )
                 total_alerts_sent += sent
 
@@ -244,10 +248,13 @@ def poll_all_items(
                     ):
                         total_notifications += 1
 
-                if not llm_result.skipped and llm_result.action == "buy_now":
-                    decisions = get_decisions_for_item(engine, item_id, limit=1)
-                    if decisions and notify(
-                        query, decisions[0],
+                if rec.action == "buy_now":
+                    # Fetch the stored deterministic recommendation row
+                    rec_row = get_latest_deterministic_recommendation(
+                        engine, item_id,
+                    )
+                    if rec_row and notify(
+                        query, rec_row,
                         recipient=notify_recipient, **nf_kwargs,
                     ):
                         total_notifications += 1

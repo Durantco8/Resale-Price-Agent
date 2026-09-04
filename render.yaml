@@ -1,0 +1,61 @@
+databases:
+  - name: resale-agent-db
+    plan: free
+    databaseName: resale_agent
+    user: resale_agent
+
+services:
+  - type: web
+    name: resale-price-agent
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn "resale_price_agent.app:create_app()" --bind 0.0.0.0:$PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: resale-agent-db
+          property: connectionString
+      - key: EBAY_CLIENT_ID
+        sync: false
+      - key: EBAY_CLIENT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: POLLER_OWNER
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.12"
+
+  - type: cron
+    name: resale-price-poller
+    runtime: python
+    plan: starter
+    schedule: "0 */3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python poller.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: resale-agent-db
+          property: connectionString
+      - key: EBAY_CLIENT_ID
+        sync: false
+      - key: EBAY_CLIENT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: POLLER_OWNER
+        sync: false
+      - key: NOTIFY_TO
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.12"
