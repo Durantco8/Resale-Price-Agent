@@ -8,15 +8,15 @@ Uses the app factory pattern so tests can inject an in-memory SQLite
 engine and run without any real API calls.
 """
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import create_engine
 
 from resale_price_agent.db import (
     create_alert,
     get_decisions_for_item,
+    get_engine,
     get_seeded_items,
     get_snapshots_for_item,
     get_tracked_item,
@@ -25,6 +25,7 @@ from resale_price_agent.db import (
 )
 from resale_price_agent.recommendation import get_latest_deterministic_recommendation
 from resale_price_agent.search import search
+from resale_price_agent.signals import compute_signals
 
 
 def create_app(config=None):
@@ -36,9 +37,7 @@ def create_app(config=None):
     # --- DB engine ---
     engine = app.config.get("ENGINE")
     if engine is None:
-        db_url = app.config.get("DATABASE_URL", "sqlite:///resale_agent.db")
-        engine = create_engine(db_url, echo=False)
-        metadata.create_all(engine)
+        engine = get_engine()
         app.config["ENGINE"] = engine
 
     # --- CORS ---
@@ -155,6 +154,7 @@ def create_app(config=None):
         item_snapshots = get_snapshots_for_item(engine, item_id)
         item_decisions = get_decisions_for_item(engine, item_id)
         rec = get_latest_deterministic_recommendation(engine, item_id)
+        signals = compute_signals(engine, item_id)
 
         return jsonify({
             "tracked_item": _serialize_item(item),
@@ -163,6 +163,7 @@ def create_app(config=None):
             "snapshots": [_serialize_row(s) for s in item_snapshots],
             "decisions": [_serialize_row(d) for d in item_decisions],
             "recommendation": _serialize_row(rec) if rec else None,
+            "signals": signals.to_dict(),
         })
 
     return app

@@ -5,7 +5,6 @@ import SearchBar from '../components/SearchBar';
 import PriceChart from '../components/PriceChart';
 import ListingStats from '../components/ListingStats';
 import RecentListings from '../components/RecentListings';
-import DecisionLog from '../components/DecisionLog';
 import RecommendationBanner from '../components/RecommendationBanner';
 import CollectingState from '../components/CollectingState';
 import NotifyForm from '../components/NotifyForm';
@@ -45,7 +44,7 @@ export default function ItemPage() {
     );
   }
 
-  const { tracked_item, snapshots, decisions, status, snapshot_count, recommendation } = data;
+  const { tracked_item, snapshots, status, snapshot_count, recommendation, signals } = data;
 
   return (
     <div className="item-page">
@@ -61,10 +60,9 @@ export default function ItemPage() {
       ) : (
         <>
           <RecommendationBanner recommendation={recommendation} />
-          <ListingStats snapshots={snapshots} />
+          <ListingStats signals={signals} />
           <RecentListings snapshots={snapshots} />
           <PriceChart snapshots={snapshots} />
-          <DecisionLog decisions={decisions} />
         </>
       )}
 

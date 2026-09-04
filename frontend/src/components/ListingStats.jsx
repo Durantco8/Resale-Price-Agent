@@ -1,28 +1,41 @@
-export default function ListingStats({ snapshots }) {
-  if (!snapshots || snapshots.length === 0) return null;
+export default function ListingStats({ signals }) {
+  if (!signals) return null;
 
-  const prices = snapshots.map((s) => s.price);
-  const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
+  if (!signals.sufficient_data) {
+    return (
+      <div className="listing-stats listing-stats--collecting">
+        <p className="listing-stats__message">Collecting data&hellip; stats will appear after enough poll cycles.</p>
+      </div>
+    );
+  }
+
+  const fmt = (v) => v != null ? `$${v.toFixed(2)}` : '—';
 
   return (
     <div className="listing-stats">
       <div className="stat-card">
-        <span className="stat-card__label">Average</span>
-        <span className="stat-card__value">${avg.toFixed(2)}</span>
+        <span className="stat-card__label">Median</span>
+        <span className="stat-card__value">{fmt(signals.latest_batch_median)}</span>
       </div>
       <div className="stat-card">
-        <span className="stat-card__label">Low</span>
-        <span className="stat-card__value stat-card__value--low">${min.toFixed(2)}</span>
+        <span className="stat-card__label">25th Pct</span>
+        <span className="stat-card__value stat-card__value--low">{fmt(signals.price_p25)}</span>
       </div>
       <div className="stat-card">
-        <span className="stat-card__label">High</span>
-        <span className="stat-card__value stat-card__value--high">${max.toFixed(2)}</span>
+        <span className="stat-card__label">75th Pct</span>
+        <span className="stat-card__value stat-card__value--high">{fmt(signals.price_p75)}</span>
       </div>
       <div className="stat-card">
         <span className="stat-card__label">Listings</span>
-        <span className="stat-card__value">{snapshots.length}</span>
+        <span className="stat-card__value">{signals.latest_batch_listing_count}</span>
+      </div>
+      <div className="stat-card stat-card--secondary">
+        <span className="stat-card__label">All-Time Low</span>
+        <span className="stat-card__value stat-card__value--low">{fmt(signals.min_price)}</span>
+      </div>
+      <div className="stat-card stat-card--secondary">
+        <span className="stat-card__label">All-Time High</span>
+        <span className="stat-card__value stat-card__value--high">{fmt(signals.max_price)}</span>
       </div>
     </div>
   );

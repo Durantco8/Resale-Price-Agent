@@ -1,6 +1,7 @@
 """Tests for the Flask API layer — all using test client, no real network."""
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -13,6 +14,7 @@ from resale_price_agent.db import (
     insert_snapshots,
     metadata,
 )
+from resale_price_agent.signals import compute_signals
 
 
 @pytest.fixture
@@ -277,3 +279,73 @@ class TestRateLimiting:
             "condition": "buy_now",
         })
         assert resp.status_code == 429
+
+
+# ---------------------------------------------------------------------------
+# Signals in /api/items/<id>
+# ---------------------------------------------------------------------------
+
+def _insert_batch(engine, item_id, batch_id, prices, time_offset_hours=0):
+    """Insert a batch of snapshots with distinct eBay item IDs."""
+    t = datetime.now(timezone.utc) - timedelta(hours=time_offset_hours)
+    rows = [
+        {
+            "ebay_item_id": f"v1|{batch_id}{i:04d}|0",
+            "title": "Test Item",
+            "price": p,
+            "poll_batch_id": batch_id,
+            "snapshot_time": t,
+        }
+        for i, p in enumerate(prices)
+    ]
+    insert_snapshots(engine, item_id, rows, poll_batch_id=batch_id)
+
+
+class TestItemDetailSignals:
+    def test_item_detail_includes_signals(self, client, engine):
+        """Endpoint returns a signals dict with expected TrendSignals fields."""
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _insert_batch(engine, item["id"], "batch_a", [200, 210, 190], time_offset_hours=48)
+        _insert_batch(engine, item["id"], "batch_b", [195, 205, 185], time_offset_hours=0)
+
+        resp = client.get(f"/api/items/{item['id']}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert "signals" in data
+        signals = data["signals"]
+        for key in (
+            "sufficient_data", "latest_batch_median", "price_p25",
+            "price_p75", "avg_price", "min_price", "max_price",
+        ):
+            assert key in signals, f"Missing key: {key}"
+
+    def test_signals_match_compute_signals(self, client, engine):
+        """API signals must exactly match compute_signals() output."""
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _insert_batch(engine, item["id"], "batch_a", [200, 210, 190], time_offset_hours=48)
+        _insert_batch(engine, item["id"], "batch_b", [195, 205, 185], time_offset_hours=0)
+
+        resp = client.get(f"/api/items/{item['id']}")
+        api_signals = resp.get_json()["signals"]
+
+        direct_signals = compute_signals(engine, item["id"]).to_dict()
+
+        # Compare all numeric/boolean fields (skip latest_batch_time — may drift by ms)
+        for key in direct_signals:
+            if key == "latest_batch_time":
+                continue
+            assert api_signals[key] == direct_signals[key], (
+                f"Mismatch on '{key}': API={api_signals[key]}, direct={direct_signals[key]}"
+            )
+
+    def test_signals_present_even_with_insufficient_data(self, client, engine):
+        """A single batch should still return signals with sufficient_data=False."""
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        _insert_batch(engine, item["id"], "batch_only", [200, 210], time_offset_hours=0)
+
+        resp = client.get(f"/api/items/{item['id']}")
+        data = resp.get_json()
+
+        assert "signals" in data
+        assert data["signals"]["sufficient_data"] is False
