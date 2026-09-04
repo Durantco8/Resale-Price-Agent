@@ -1,10 +1,11 @@
 # Resale Price Agent — Progress Summary
 
-*Last updated: Sep 3, 2026 (Session 8, clickable price-history listings). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
+*Last updated: Sep 4, 2026 (Session 10, UTC fix + trending card polish + deployment). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
 
 **Project path:** `/Users/durantco/Documents/RESUME PROJECTS/Resale Price Agent`
 **GitHub:** `Durantco8/Resale-Price-Agent`
-**Stack:** Python CLI pipeline + Flask backend + React (Vite) frontend + **SQLite (confirmed — see Section 8, this is NOT Postgres despite earlier assumptions)**
+**Live site:** `resale-price-agent.vercel.app` (frontend) / `resale-price-agent.onrender.com` (API)
+**Stack:** Python CLI pipeline + Flask backend + React (Vite) frontend + **Postgres on Render** (migrated from SQLite in Session 9)
 **Purpose:** Started as a personal eBay resale price-tracking agent, evolved into a public-facing site where any user can search an item, view price trends, and (eventually) sign up for email alerts.
 
 ---
@@ -132,17 +133,11 @@ The cold-start fix only protects items on their *first* poll going forward — i
 
 ---
 
-## 8. Critical Correction: SQLite, Not Postgres
+## 8. SQLite → Postgres Migration (Resolved in Session 9)
 
-**Earlier documentation (and assumptions throughout this project) incorrectly referred to the working database as "production PostgreSQL."** This has now been explicitly verified and corrected:
+**Previously:** The project ran on a local SQLite file (`resale_agent.db`). This blocked Render deployment since a background worker can't read a file on CD's laptop.
 
-- **Confirmed: the project has been running on a local SQLite file (`resale_agent.db`) the entire time.** No `DATABASE_URL` is configured in `.env`.
-- **Everything described in Sections 4-7 — all 76 items, all snapshots, all decisions, CD's personal Jordan 4 data — lives in this local SQLite file, not a hosted database.**
-- **This has direct, unresolved implications for Render deployment:** a Render background worker cannot read a file sitting on CD's laptop. Before Render can be set up as planned, this needs:
-  1. A real hosted Postgres instance provisioned (Render offers this)
-  2. A `DATABASE_URL` configured and verified
-  3. A decision on whether to migrate the current SQLite data into Postgres, or start fresh
-- **This is an open item, not yet resolved or scheduled.** Do not proceed with Render setup assuming Postgres is already live — it is not.
+**Resolved:** In Session 9, a free-tier Postgres instance was provisioned on Render. `db.py` now reads `DATABASE_URL` from the environment, with automatic `postgres://` → `postgresql://` prefix conversion for Render compatibility. The decision was to **start fresh** on Postgres rather than migrate the existing SQLite data. 75 seed items were re-created via `seed_all()` and the poller began collecting fresh eBay data.
 
 ---
 
@@ -189,10 +184,10 @@ This backlog is no longer a core-product task. A similar queue may be useful lat
 
 ## 11. Not Yet Started
 
-- **SQLite → Postgres migration / Render deployment** — blocked on the Section 8 correction. This is now the most significant open architectural item.
+- ~~SQLite → Postgres migration / Render deployment~~ — **Done (Session 9).**
 - **A dedicated personal "test item"** for CD to watch agent behavior (notifications, trend accumulation) over several days once things are stable.
-- **Public alert subscriptions** — `process_alerts()` exists and is tested. The local `alerts` table now contains 2 subscriptions created while using the site, but the site is not deployed and there is no real public usage yet.
-- **One final controlled wipe before launch** (Section 10b concept) — the mechanism is ready, but do not run it without a separate explicit approval after reviewing a fresh preview.
+- **Public alert subscriptions** — `process_alerts()` exists and is tested. The site is now deployed; real public usage can begin.
+- **Category filtering on trending grid** — 75 cards is a lot to scroll. A tab bar (Electronics, Sneakers, Trading Cards, etc.) would make the homepage more navigable.
 
 ---
 
@@ -362,20 +357,69 @@ The custom hover tooltip shows title, price, shipping, condition, and the full o
 
 **Validation:** 6 frontend tests passed; frontend lint passed with one pre-existing `ItemPage.jsx` effect warning; production build passed with the existing bundle-size advisory. The Python suite remains at 309 passed with one non-blocking Google GenAI deprecation warning.
 
+### Session 9: Notifications swap + Render/Vercel deployment
+
+**Status: completed, deployed, live.**
+
+#### Notification system wired to deterministic engine
+- `alerts.py` — `match_alerts()` and `process_alerts()` now take a `Recommendation` instead of `LLMDecision`. The `buy_now` condition checks `recommendation.action == "buy_now"`.
+- `notifier.py` — `notify()` checks `event_type == "deterministic_recommendation"` instead of `"llm_reasoning"`.
+- `poller.py` — Personal owner notifications now check `rec.action == "buy_now"` and fetch the stored deterministic recommendation row via `get_latest_deterministic_recommendation()`. LLM result is still computed but no longer drives alerts or notifications.
+- `NotifyForm.jsx` — Changed "AI recommends" to "Recommends".
+- Analysis Log (`DecisionLog` component) removed from item detail page entirely. Gemini LLM reasoning was contradicting the deterministic recommendation, confusing users.
+
+#### Render deployment
+- `render.yaml` — Defines free-tier Postgres (`resale-agent-db`), web service (`resale-price-agent`, Starter plan, gunicorn), and cron job (`resale-price-poller`, Starter plan).
+- `db.py` — Added `_resolve_db_url()` helper: reads `DATABASE_URL` from env, handles Render's `postgres://` → `postgresql://` prefix conversion. `get_engine()` now accepts `None` default and falls back to SQLite for local dev.
+- `app.py` — Switched from direct `create_engine()` to `get_engine()` for DATABASE_URL support.
+- `requirements.txt` — Added `gunicorn>=21.2.0` and `psycopg2-binary>=2.9.0`.
+- `.env.example` — Added `DATABASE_URL` with commented example.
+- Database seeded with 75 items via `seed_all()` in Render shell. Started fresh on Postgres (no SQLite data migration).
+
+#### Vercel frontend deployment
+- React frontend deployed to `resale-price-agent.vercel.app` with `VITE_API_URL` env var pointing to the Render API.
+- `api.js` already used `import.meta.env.VITE_API_URL` — no code changes needed.
+
+#### Cron schedule
+- Initially set to every 3 hours (`0 */3 * * *`), changed to once daily at 8 AM UTC (`0 8 * * *`) to reduce Render compute costs (~$7/month per service).
+
+#### Recommendation reasoning includes history context
+- `recommendation.py` — Added `_history_label()` helper that converts `history_span_days` to human-friendly labels (e.g. 0.5 → "< 1 day", 3 → "3 days"). Gates 2, 3, and 4 now end reasoning with "Based on {history} of data."
+
+**Tests:** 318 passed (309 existing - 1 removed `test_does_not_fire_on_skipped_decision` + 10 new: 6 history label + 4 reasoning context). 7 frontend tests passed.
+
+### Session 10: UTC fix + trending card polish
+
+**Status: completed, deployed.**
+
+#### UTC timestamp fix
+- `app.py` `_serialize_row()` — Naive datetime objects now get a `Z` suffix appended to their ISO string, so JavaScript's `new Date()` correctly treats them as UTC and `toLocaleString()` converts to the user's local timezone.
+- 2 new tests in `test_app.py` verify API timestamps end with `Z`.
+
+#### Hero text fix
+- `HomePage.jsx` — Changed "AI-powered buy/wait/skip recommendations" to "data-driven buy/wait/skip recommendations".
+
+#### Smart chart x-axis
+- `priceChartUtils.js` — `buildChartData()` now computes the time span of the dataset. When data spans < 36 hours, x-axis labels show time-of-day ("4:50 AM") instead of repeating "Sep 4" for every point. Multi-day data still shows "Sep 4" format.
+- Updated frontend tests: 7 passed (5 existing + 2 new smart date axis tests).
+
+#### Enriched trending grid cards
+- `app.py` `/api/trending` — Now calls `compute_signals()` per item and includes `signals_summary` (median price, price trend, trend %) when sufficient data exists.
+- `TrendingGrid.jsx` — Cards now show median price and trend indicator (arrow + percentage) instead of "X snapshots". Trend colors: green for falling (good for buyers), red for rising, muted for flat. "Collecting data..." shown when insufficient data.
+- `index.css` — New styles for `.trending-card__price`, `.trending-card__trend`, `.trend--falling/rising/flat`.
+
+#### Mobile responsiveness
+- Trending grid: single-column layout below 640px.
+- Item page: rec-banner header wraps on narrow screens, chart tooltip constrained to viewport width.
+
+**Tests:** 320 Python tests passed (318 + 2 new timestamp tests). 7 frontend tests passed. 1 non-blocking google.genai deprecation warning.
+
 ### Current cautions / unresolved context
 
-- **Verified live SQLite state at the end of Session 8:** 76 tracked items, 6,581 snapshots, 394 decisions, 2 alert subscriptions, and 152 total poll batches. Every item has 2 poll batches; 74 are active and 2 remain collecting.
-- All 76 items now have a deterministic recommendation. Latest actions are 2 `BUY`, 68 `WAIT`, and 6 `SKIP`. The two low-volume collecting items remain insufficient for a mature recommendation.
-- Successful Gemini reasoning exists for 20 items. Gemini remains quota-limited, but this does not block snapshot collection or deterministic recommendations.
+- **Live Postgres state (Render):** 75 tracked items, ~200 snapshots per item, 4 poll batches accumulated. All items currently WAIT with 0.2 confidence (insufficient history — only ~8 hours of data). Trends will improve as daily polls accumulate.
+- Gemini reasoning runs in the poller but is not exposed in the UI (Analysis Log removed). It remains in place for eventual optional `llm_analysis`.
 - The `active` status threshold is still row-count based (≥5 snapshots), not batch-maturity based. The deterministic engine's Gate 0 (`sufficient_data`) handles this at the recommendation level.
-- `tracked_items` still has no `target_price` column even though price-drop code can accept a target price; not currently configurable from the live schema.
-- `/api/trending` now returns `recommendation` (deterministic) alongside `latest_decision` (legacy LLM). Frontend `TrendingGrid` prefers `recommendation` when available.
-- Current `buy_now` public alerts and owner notifications still depend on `LLMDecision`; notification migration to the deterministic engine is intentionally later work.
-- Gemini remains in place for eventual optional `llm_analysis`. It cannot override the deterministic recommendation.
-- Separate known issues remain: sneaker counterfeit detection and SQLite-to-hosted-Postgres/Render deployment.
-
-### Working-tree handoff
-
-- Sessions 7 and 8 are present in the local working tree but are not yet committed. This includes the item-detail TrendSignals integration, ListingStats rewrite, clickable price-chart dots/tooltips, frontend Vitest setup, and their tests.
-- The old standalone spec file remains marked for deletion. `.claude/` and `.DS_Store` are untracked; review repository hygiene before committing rather than including them automatically.
-- Latest validation: 309 Python tests passed with one third-party Google GenAI deprecation warning; 6 frontend tests passed; frontend lint passed with one pre-existing `ItemPage.jsx` effect warning; production frontend build passed with the existing bundle-size advisory.
+- `tracked_items` still has no `target_price` column configurable from the UI.
+- Sneaker counterfeit detection remains an open data-quality issue.
+- User searches automatically create new tracked items that get polled going forward. No hard limit on tracked item count.
+- Render cron polls once daily at 8 AM UTC (4 AM Eastern). Render Starter plan costs ~$7/month per service (~$14/month total for web + cron). Postgres is free tier.
