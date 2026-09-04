@@ -257,7 +257,8 @@ class TestStatusTransition:
 # ---------------------------------------------------------------------------
 
 class TestSnapshotAccumulation:
-    def test_snapshots_accumulate(self, engine):
+    def test_duplicate_listings_are_skipped(self, engine):
+        """Same ebay_item_id across polls should only be stored once."""
         item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
 
         ebay = _MockEbay([_listing(item_id="v1|111|0")])
@@ -268,20 +269,28 @@ class TestSnapshotAccumulation:
         poll_all_items(engine, ebay, llm)
 
         snaps = get_snapshots_for_item(engine, item["id"])
-        assert len(snaps) == 3
+        assert len(snaps) == 1
 
-    def test_count_accurate_after_multiple_cycles(self, engine):
+    def test_new_listings_accumulate_across_polls(self, engine):
+        """Different ebay_item_ids across polls should all be stored."""
         item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
-
-        listings = [_listing(item_id=f"v1|{i}|0", price=200.0 + i) for i in range(3)]
-        ebay = _MockEbay(listings)
         llm = _MockLLM()
 
-        poll_all_items(engine, ebay, llm)  # +3
-        poll_all_items(engine, ebay, llm)  # +3
+        # First poll: 3 listings
+        ebay1 = _MockEbay([_listing(item_id=f"v1|{i}|0", price=200.0 + i) for i in range(3)])
+        poll_all_items(engine, ebay1, llm)  # +3
+
+        # Second poll: 2 old + 2 new
+        ebay2 = _MockEbay([
+            _listing(item_id="v1|0|0", price=200.0),
+            _listing(item_id="v1|1|0", price=201.0),
+            _listing(item_id="v1|10|0", price=210.0),
+            _listing(item_id="v1|11|0", price=211.0),
+        ])
+        poll_all_items(engine, ebay2, llm)  # +2 new only
 
         snaps = get_snapshots_for_item(engine, item["id"])
-        assert len(snaps) == 6
+        assert len(snaps) == 5
 
 
 # ---------------------------------------------------------------------------

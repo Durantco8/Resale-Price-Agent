@@ -451,6 +451,18 @@ def get_snapshots_for_item(
         return [dict(r._mapping) for r in rows]
 
 
+def get_seen_ebay_ids(engine, tracked_item_id: int) -> set[str]:
+    """Return the set of ebay_item_ids already stored for a tracked item."""
+    from sqlalchemy import select
+    stmt = (
+        select(snapshots.c.ebay_item_id)
+        .where(snapshots.c.tracked_item_id == tracked_item_id)
+        .distinct()
+    )
+    with engine.connect() as conn:
+        return {row[0] for row in conn.execute(stmt)}
+
+
 # ---------------------------------------------------------------------------
 # Decisions
 # ---------------------------------------------------------------------------

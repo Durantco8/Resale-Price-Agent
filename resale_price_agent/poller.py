@@ -17,6 +17,7 @@ from resale_price_agent.alerts import process_alerts
 from resale_price_agent.db import (
     get_all_tracked_items,
     get_decisions_for_item,
+    get_seen_ebay_ids,
     get_snapshots_for_item,
     insert_snapshots,
     set_tracked_item_status,
@@ -184,15 +185,25 @@ def poll_all_items(
                 )
                 snapshot_dicts = [snapshot_to_dict(s) for s in listings]
                 snapshot_dicts = filter_outliers(engine, item_id, snapshot_dicts)
+
+                # Deduplicate: only store listings not already seen
+                seen_ids = get_seen_ebay_ids(engine, item_id)
+                new_dicts = [
+                    s for s in snapshot_dicts
+                    if s["ebay_item_id"] not in seen_ids
+                ]
+
                 batch_id = uuid.uuid4().hex
                 count = insert_snapshots(
-                    engine, item_id, snapshot_dicts, poll_batch_id=batch_id,
+                    engine, item_id, new_dicts, poll_batch_id=batch_id,
                 )
                 total_snapshots += count
                 processed += 1
                 log.info(
-                    "  #%d \"%s\" \u2014 %d listing(s) stored",
+                    "  #%d \"%s\" \u2014 %d new listing(s) stored "
+                    "(%d duplicate(s) skipped)",
                     item_id, query, count,
+                    len(snapshot_dicts) - len(new_dicts),
                 )
 
             # --- Status transition ---
