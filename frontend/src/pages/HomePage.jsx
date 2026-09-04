@@ -11,7 +11,7 @@ export default function HomePage() {
         </h1>
         <p className="hero-section__desc">
           Search any item to see its eBay price history, trend analysis,
-          and AI-powered buy/wait/skip recommendations — no account needed.
+          and data-driven buy/wait/skip recommendations — no account needed.
         </p>
         <SearchBar large />
       </section>

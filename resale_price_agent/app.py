@@ -134,12 +134,22 @@ def create_app(config=None):
             if decs:
                 latest_decision = _serialize_row(decs[0])
             rec = get_latest_deterministic_recommendation(engine, item["id"])
+            signals = compute_signals(engine, item["id"])
+            signals_summary = None
+            if signals.sufficient_data:
+                signals_summary = {
+                    "latest_batch_median": signals.latest_batch_median,
+                    "price_trend": signals.price_trend,
+                    "price_trend_pct": signals.price_trend_pct,
+                    "history_span_days": signals.history_span_days,
+                }
             results.append({
                 "tracked_item": _serialize_item(item),
                 "snapshot_count": snap_count,
                 "status": item["status"],
                 "latest_decision": latest_decision,
                 "recommendation": _serialize_row(rec) if rec else None,
+                "signals_summary": signals_summary,
             })
         # Richest data first
         results.sort(key=lambda r: r["snapshot_count"], reverse=True)
@@ -179,7 +189,9 @@ def _serialize_row(row: dict) -> dict:
     out = {}
     for k, v in row.items():
         if isinstance(v, datetime):
-            out[k] = v.isoformat()
+            # All DB timestamps are UTC; append Z so JS converts to local time
+            iso = v.isoformat()
+            out[k] = iso + "Z" if not v.utcoffset() else iso
         else:
             out[k] = v
     return out

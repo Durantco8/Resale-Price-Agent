@@ -354,11 +354,42 @@ p {
   color: var(--color-text-muted);
 }
 
+.trending-card__price {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--color-text);
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+.trending-card__trend {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trend--falling { color: var(--color-green); }
+.trend--rising { color: var(--color-red, #ef4444); }
+.trend--flat { color: var(--color-text-muted); }
+
+.trending-card__collecting {
+  font-size: 13px;
+  font-style: italic;
+}
+
 .trending-card__action {
   font-weight: 600;
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 99px;
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .trending__grid {
+    grid-template-columns: 1fr;
+  }
+  .trending-card__price {
+    font-size: 15px;
+  }
 }
 
 /* ============================================
@@ -484,6 +515,15 @@ p {
 @media (max-width: 640px) {
   .item-page__title {
     font-size: 22px;
+  }
+  .rec-banner__header {
+    flex-wrap: wrap;
+  }
+  .rec-banner__action {
+    font-size: 16px;
+  }
+  .price-chart__tooltip {
+    max-width: calc(100vw - 48px);
   }
 }
 

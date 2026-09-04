@@ -58,16 +58,26 @@ describe('buildChartData', () => {
 });
 
 
-describe('categorical date axis', () => {
-  it('keeps same-day listings as separate date-labelled points', () => {
+describe('smart date axis', () => {
+  it('uses time-of-day labels when all data is within 36 hours', () => {
     const data = buildChartData(snapshots);
 
     expect(data).toHaveLength(2);
-    expect(data[0].date).toBe(formatDate(data[0].timestampIso));
-    expect(data[1].date).toBe(formatDate(data[1].timestampIso));
-    expect(data[0].date).toBe(data[1].date);
+    // 6 hours apart — should show time format, not date format
+    expect(data[0].date).not.toBe(formatDate(data[0].timestampIso));
+    expect(data[0].date).toMatch(/AM|PM/);
+    expect(data[1].date).toMatch(/AM|PM/);
   });
 
+  it('uses date labels when data spans multiple days', () => {
+    const multiDay = [
+      { ...snapshots[0], snapshot_time: '2026-09-10T12:00:00Z' },
+      { ...snapshots[1], snapshot_time: '2026-09-03T12:00:00Z' },
+    ];
+    const data = buildChartData(multiDay);
+
+    expect(data[0].date).toBe(formatDate(data[0].timestampIso));
+  });
 });
 
 

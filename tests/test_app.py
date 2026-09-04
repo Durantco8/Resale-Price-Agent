@@ -349,3 +349,36 @@ class TestItemDetailSignals:
 
         assert "signals" in data
         assert data["signals"]["sufficient_data"] is False
+
+
+# ---------------------------------------------------------------------------
+# Timestamp serialization
+# ---------------------------------------------------------------------------
+
+class TestTimestampSerialization:
+    def test_snapshot_timestamps_have_utc_suffix(self, client, engine):
+        """All datetime fields must end with 'Z' so JS treats them as UTC."""
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+        insert_snapshots(engine, item["id"], [
+            {"ebay_item_id": "v1|111|0", "title": "J4", "price": 200.0},
+        ])
+
+        resp = client.get(f"/api/items/{item['id']}")
+        data = resp.get_json()
+
+        # snapshot_time should end with Z
+        snap = data["snapshots"][0]
+        assert snap["snapshot_time"].endswith("Z"), (
+            f"Expected UTC suffix, got: {snap['snapshot_time']}"
+        )
+
+    def test_tracked_item_timestamps_have_utc_suffix(self, client, engine):
+        item, _, _ = get_or_create_tracked_item(engine, "Jordan 4")
+
+        resp = client.get(f"/api/items/{item['id']}")
+        data = resp.get_json()
+
+        created = data["tracked_item"]["created_at"]
+        assert created.endswith("Z"), (
+            f"Expected UTC suffix, got: {created}"
+        )

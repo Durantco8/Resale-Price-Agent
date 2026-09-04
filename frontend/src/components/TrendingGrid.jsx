@@ -22,6 +22,14 @@ function actionClass(action) {
   return 'action--skip';
 }
 
+function TrendIndicator({ trend, pct }) {
+  if (!trend || trend === 'flat') return <span className="trending-card__trend trend--flat">Flat</span>;
+  const arrow = trend === 'falling' ? '\u2193' : '\u2191';
+  const cls = trend === 'falling' ? 'trend--falling' : 'trend--rising';
+  const label = pct != null ? `${arrow} ${Math.abs(pct).toFixed(1)}%` : arrow;
+  return <span className={`trending-card__trend ${cls}`}>{label}</span>;
+}
+
 export default function TrendingGrid() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +60,7 @@ export default function TrendingGrid() {
           const item = entry.tracked_item;
           const dec = entry.recommendation || entry.latest_decision;
           const label = actionLabel(dec);
+          const sig = entry.signals_summary;
           return (
             <Link
               key={item.id}
@@ -63,7 +72,16 @@ export default function TrendingGrid() {
                 <StatusBadge status={entry.status} />
               </div>
               <div className="trending-card__meta">
-                <span>{entry.snapshot_count} snapshot{entry.snapshot_count !== 1 ? 's' : ''}</span>
+                {sig ? (
+                  <>
+                    <span className="trending-card__price">
+                      ${sig.latest_batch_median.toFixed(0)}
+                    </span>
+                    <TrendIndicator trend={sig.price_trend} pct={sig.price_trend_pct} />
+                  </>
+                ) : (
+                  <span className="trending-card__collecting">Collecting data...</span>
+                )}
                 {label && (
                   <span className={`trending-card__action ${actionClass(dec.action)}`}>
                     {label}
