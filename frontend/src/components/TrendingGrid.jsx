@@ -22,14 +22,6 @@ function actionClass(action) {
   return 'action--skip';
 }
 
-function TrendIndicator({ trend, pct }) {
-  if (!trend || trend === 'flat') return <span className="trending-card__trend trend--flat">Flat</span>;
-  const arrow = trend === 'falling' ? '\u2193' : '\u2191';
-  const cls = trend === 'falling' ? 'trend--falling' : 'trend--rising';
-  const label = pct != null ? `${arrow} ${Math.abs(pct).toFixed(1)}%` : arrow;
-  return <span className={`trending-card__trend ${cls}`}>{label}</span>;
-}
-
 export default function TrendingGrid() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,12 +65,9 @@ export default function TrendingGrid() {
               </div>
               <div className="trending-card__meta">
                 {sig ? (
-                  <>
-                    <span className="trending-card__price">
-                      ${sig.latest_batch_median.toFixed(0)}
-                    </span>
-                    <TrendIndicator trend={sig.price_trend} pct={sig.price_trend_pct} />
-                  </>
+                  <span className="trending-card__price">
+                    ${sig.latest_batch_median.toFixed(0)}
+                  </span>
                 ) : (
                   <span className="trending-card__collecting">Collecting data...</span>
                 )}
