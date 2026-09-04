@@ -24,7 +24,6 @@ from resale_price_agent.db import (
     unsubscribe_by_token,
 )
 from resale_price_agent.conditions import label_listings
-from resale_price_agent.recommendation import get_latest_deterministic_recommendation
 from resale_price_agent.search import search
 from resale_price_agent.signals import compute_signals, compute_signals_by_condition
 
@@ -130,11 +129,6 @@ def create_app(config=None):
         results = []
         for item in items:
             snap_count = len(get_snapshots_for_item(engine, item["id"]))
-            latest_decision = None
-            decs = get_decisions_for_item(engine, item["id"], limit=1)
-            if decs:
-                latest_decision = _serialize_row(decs[0])
-            rec = get_latest_deterministic_recommendation(engine, item["id"])
             signals = compute_signals(engine, item["id"])
             signals_summary = None
             if signals.sufficient_data:
@@ -148,8 +142,6 @@ def create_app(config=None):
                 "tracked_item": _serialize_item(item),
                 "snapshot_count": snap_count,
                 "status": item["status"],
-                "latest_decision": latest_decision,
-                "recommendation": _serialize_row(rec) if rec else None,
                 "signals_summary": signals_summary,
             })
         # Richest data first
@@ -164,7 +156,6 @@ def create_app(config=None):
 
         item_snapshots = get_snapshots_for_item(engine, item_id)
         item_decisions = get_decisions_for_item(engine, item_id)
-        rec = get_latest_deterministic_recommendation(engine, item_id)
         signals_by_cond = compute_signals_by_condition(engine, item_id)
         listing_labels = label_listings(item_snapshots, signals_by_cond)
 
@@ -174,7 +165,6 @@ def create_app(config=None):
             "snapshot_count": len(item_snapshots),
             "snapshots": [_serialize_row(s) for s in item_snapshots],
             "decisions": [_serialize_row(d) for d in item_decisions],
-            "recommendation": _serialize_row(rec) if rec else None,
             "signals": signals_by_cond["All"].to_dict(),
             "signals_by_condition": {
                 k: v.to_dict() for k, v in signals_by_cond.items()

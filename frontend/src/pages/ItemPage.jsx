@@ -5,7 +5,6 @@ import SearchBar from '../components/SearchBar';
 import PriceChart from '../components/PriceChart';
 import ListingStats from '../components/ListingStats';
 import RecentListings from '../components/RecentListings';
-import RecommendationBanner from '../components/RecommendationBanner';
 import CollectingState from '../components/CollectingState';
 import NotifyForm from '../components/NotifyForm';
 import ConditionTabs from '../components/ConditionTabs';
@@ -50,7 +49,7 @@ export default function ItemPage() {
 
   const {
     tracked_item, snapshots, status, snapshot_count,
-    recommendation, signals, signals_by_condition, listing_labels,
+    signals, signals_by_condition, listing_labels,
   } = data;
 
   // Derive condition tiers present (excluding "All" — that's added by ConditionTabs)
@@ -81,7 +80,6 @@ export default function ItemPage() {
         <CollectingState snapshotCount={snapshot_count} />
       ) : (
         <>
-          <RecommendationBanner recommendation={recommendation} />
           <ConditionTabs
             conditions={conditionTiers}
             active={activeCondition}

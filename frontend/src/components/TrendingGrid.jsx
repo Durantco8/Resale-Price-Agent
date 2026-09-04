@@ -10,18 +10,6 @@ function StatusBadge({ status }) {
   );
 }
 
-function actionLabel(decision) {
-  if (!decision) return null;
-  const labels = { buy_now: 'Buy Now', wait: 'Wait', skip: 'Skip' };
-  return labels[decision.action] || decision.action;
-}
-
-function actionClass(action) {
-  if (action === 'buy_now') return 'action--buy';
-  if (action === 'wait') return 'action--wait';
-  return 'action--skip';
-}
-
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'graded', label: 'Graded' },
@@ -72,8 +60,6 @@ export default function TrendingGrid() {
       <div className="trending__grid">
         {filtered.map((entry) => {
           const item = entry.tracked_item;
-          const dec = entry.recommendation || entry.latest_decision;
-          const label = actionLabel(dec);
           const sig = entry.signals_summary;
           return (
             <Link
@@ -92,11 +78,6 @@ export default function TrendingGrid() {
                   </span>
                 ) : (
                   <span className="trending-card__collecting">Collecting data...</span>
-                )}
-                {label && (
-                  <span className={`trending-card__action ${actionClass(dec.action)}`}>
-                    {label}
-                  </span>
                 )}
               </div>
             </Link>
