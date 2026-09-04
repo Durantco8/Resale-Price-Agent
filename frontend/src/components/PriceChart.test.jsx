@@ -1,0 +1,132 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
+
+import {
+  ClickableListingDot,
+  ListingTooltip,
+} from './PriceChart';
+import {
+  buildChartData,
+  formatDate,
+} from './priceChartUtils';
+
+
+const snapshots = [
+  {
+    id: 2,
+    ebay_item_id: 'v1|222|0',
+    title: 'Newer listing',
+    price: 190,
+    currency: 'USD',
+    condition: 'Pre-owned',
+    shipping_cost: 0,
+    item_url: 'https://www.ebay.com/itm/222',
+    snapshot_time: '2026-09-03T21:00:00+00:00',
+  },
+  {
+    id: 1,
+    ebay_item_id: 'v1|111|0',
+    title: 'Older listing',
+    price: 200,
+    currency: 'USD',
+    condition: 'New',
+    shipping_cost: 12.5,
+    item_url: 'https://www.ebay.com/itm/111',
+    snapshot_time: '2026-09-03T15:00:00+00:00',
+  },
+];
+
+
+describe('buildChartData', () => {
+  it('reverses newest-first API data and preserves listing metadata', () => {
+    const data = buildChartData(snapshots);
+
+    expect(data.map((point) => point.snapshotId)).toEqual([1, 2]);
+    expect(data[0]).toMatchObject({
+      ebayItemId: 'v1|111|0',
+      title: 'Older listing',
+      price: 200,
+      currency: 'USD',
+      condition: 'New',
+      shippingCost: 12.5,
+      itemUrl: 'https://www.ebay.com/itm/111',
+      timestampIso: '2026-09-03T15:00:00+00:00',
+    });
+    expect(data[0].timestamp).toBe(Date.parse(data[0].timestampIso));
+  });
+});
+
+
+describe('categorical date axis', () => {
+  it('keeps same-day listings as separate date-labelled points', () => {
+    const data = buildChartData(snapshots);
+
+    expect(data).toHaveLength(2);
+    expect(data[0].date).toBe(formatDate(data[0].timestampIso));
+    expect(data[1].date).toBe(formatDate(data[1].timestampIso));
+    expect(data[0].date).toBe(data[1].date);
+  });
+
+});
+
+
+describe('ClickableListingDot', () => {
+  it('renders a safe new-tab link for a point with a listing URL', () => {
+    const point = buildChartData(snapshots)[0];
+    const markup = renderToStaticMarkup(
+      <svg><ClickableListingDot cx={20} cy={30} payload={point} /></svg>,
+    );
+
+    expect(markup).toContain('href="https://www.ebay.com/itm/111"');
+    expect(markup).toContain('target="_blank"');
+    expect(markup).toContain('rel="noopener noreferrer"');
+    expect(markup).toContain('aria-label="Open Older listing on eBay"');
+  });
+
+  it('keeps a missing-URL point visible but non-clickable', () => {
+    const point = { ...buildChartData(snapshots)[0], itemUrl: null };
+    const markup = renderToStaticMarkup(
+      <svg><ClickableListingDot cx={20} cy={30} payload={point} /></svg>,
+    );
+
+    expect(markup).not.toContain('<a');
+    expect(markup).toContain('price-chart__dot--unavailable');
+  });
+});
+
+
+describe('ListingTooltip', () => {
+  it('shows price, shipping, condition, and a precise timestamp', () => {
+    const point = buildChartData(snapshots)[0];
+    const markup = renderToStaticMarkup(
+      <ListingTooltip active payload={[{ payload: point }]} />,
+    );
+
+    expect(markup).toContain('Older listing');
+    expect(markup).toContain('$200.00');
+    expect(markup).toContain('$12.50 shipping');
+    expect(markup).toContain('New');
+    expect(markup).toMatch(/Sep/);
+    expect(markup).toMatch(/2026/);
+    expect(markup).toContain('Click point to open listing');
+  });
+
+  it('shows graceful fallbacks when optional listing details are missing', () => {
+    const point = {
+      ...buildChartData(snapshots)[0],
+      title: '',
+      condition: null,
+      shippingCost: null,
+      itemUrl: null,
+    };
+    const markup = renderToStaticMarkup(
+      <ListingTooltip active payload={[{ payload: point }]} />,
+    );
+
+    expect(markup).toContain('Untitled listing');
+    expect(markup).toContain('Unknown condition');
+    expect(markup).toContain('Shipping unavailable');
+    expect(markup).toContain('Listing link unavailable');
+  });
+});

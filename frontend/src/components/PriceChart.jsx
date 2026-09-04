@@ -1,27 +1,113 @@
+import React from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 
-function formatDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+import {
+  buildChartData,
+  formatMoney,
+  formatShipping,
+  formatTooltipTimestamp,
+  formatYAxisPrice,
+} from './priceChartUtils';
+
+
+export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
+  if (cx == null || cy == null || !payload) return null;
+
+  const visibleDot = (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={radius}
+      className="price-chart__dot"
+    />
+  );
+
+  if (!payload.itemUrl) {
+    return (
+      <g className="price-chart__dot--unavailable" aria-label="Listing link unavailable">
+        {visibleDot}
+      </g>
+    );
+  }
+
+  const listingName = payload.title || 'listing';
+  return (
+    <a
+      href={payload.itemUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Open ${listingName} on eBay`}
+      className="price-chart__dot-link"
+    >
+      <circle
+        cx={cx}
+        cy={cy}
+        r={Math.max(10, radius + 5)}
+        className="price-chart__dot-hit-area"
+      />
+      {visibleDot}
+    </a>
+  );
 }
 
-function formatPrice(val) {
-  return `$${Number(val).toFixed(0)}`;
+
+export function ListingTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+
+  const point = payload[0].payload;
+  return (
+    <div className="price-chart__tooltip">
+      <p className="price-chart__tooltip-title">
+        {point.title || 'Untitled listing'}
+      </p>
+      <dl className="price-chart__tooltip-details">
+        <div>
+          <dt>Price</dt>
+          <dd>{formatMoney(point.price, point.currency)}</dd>
+        </div>
+        <div>
+          <dt>Shipping</dt>
+          <dd>{formatShipping(point.shippingCost, point.currency)}</dd>
+        </div>
+        <div>
+          <dt>Condition</dt>
+          <dd>{point.condition || 'Unknown condition'}</dd>
+        </div>
+        <div>
+          <dt>Observed</dt>
+          <dd>{formatTooltipTimestamp(point.timestamp)}</dd>
+        </div>
+      </dl>
+      <p className="price-chart__tooltip-link-state">
+        {point.itemUrl ? 'Click point to open listing' : 'Listing link unavailable'}
+      </p>
+      {point.itemUrl && (
+        <p className="price-chart__tooltip-note">
+          Historical listings may no longer be active.
+        </p>
+      )}
+    </div>
+  );
 }
+
+
+function renderDot(props) {
+  return <ClickableListingDot {...props} />;
+}
+
+
+function renderActiveDot(props) {
+  return <ClickableListingDot {...props} radius={5} />;
+}
+
 
 export default function PriceChart({ snapshots }) {
   if (!snapshots || snapshots.length === 0) return null;
 
-  // Snapshots come newest-first from the API; reverse for chronological
-  const data = [...snapshots]
-    .reverse()
-    .map((s) => ({
-      date: formatDate(s.snapshot_time),
-      price: s.price,
-      title: s.title,
-    }));
+  const data = buildChartData(snapshots);
+  if (data.length === 0) return null;
 
   return (
     <div className="price-chart">
@@ -34,25 +120,18 @@ export default function PriceChart({ snapshots }) {
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
           />
           <YAxis
-            tickFormatter={formatPrice}
+            tickFormatter={formatYAxisPrice}
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
             width={60}
           />
-          <Tooltip
-            formatter={(val) => [`$${Number(val).toFixed(2)}`, 'Price']}
-            contentStyle={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: '6px',
-            }}
-          />
+          <Tooltip content={<ListingTooltip />} />
           <Line
             type="monotone"
             dataKey="price"
             stroke="var(--color-accent)"
             strokeWidth={2}
-            dot={{ r: 3, fill: 'var(--color-accent)' }}
-            activeDot={{ r: 5 }}
+            dot={renderDot}
+            activeDot={renderActiveDot}
           />
         </LineChart>
       </ResponsiveContainer>
