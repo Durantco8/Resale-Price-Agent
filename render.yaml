@@ -31,7 +31,7 @@ services:
     name: resale-price-poller
     runtime: python
     plan: starter
-    schedule: "0 8 * * *"
+    schedule: "0 */3 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python poller.py
     envVars:
