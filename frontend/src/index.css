@@ -391,20 +391,17 @@ p {
 /* ============================================
    Action Colors (shared)
    ============================================ */
-.action--buy,
-.decision--buy .decision-entry__action {
+.action--buy {
   background: var(--color-green-bg);
   color: var(--color-green);
 }
 
-.action--wait,
-.decision--wait .decision-entry__action {
+.action--wait {
   background: var(--color-amber-bg);
   color: var(--color-amber);
 }
 
-.action--skip,
-.decision--skip .decision-entry__action {
+.action--skip {
   background: var(--color-red-bg);
   color: var(--color-red);
 }
@@ -534,6 +531,28 @@ p {
   color: var(--color-red);
 }
 
+.stat-card--secondary {
+  background: transparent;
+  border-style: dashed;
+  padding: 12px;
+  grid-column: span 2;
+}
+
+.stat-card--secondary .stat-card__value {
+  font-size: 18px;
+}
+
+.listing-stats--collecting {
+  margin: 24px 0;
+}
+
+.listing-stats__message {
+  color: var(--color-text-muted);
+  font-style: italic;
+  text-align: center;
+  padding: 16px;
+}
+
 @media (max-width: 640px) {
   .listing-stats {
     grid-template-columns: repeat(2, 1fr);
@@ -632,65 +651,83 @@ p {
   font-size: 16px;
 }
 
-/* ============================================
-   Decision Log
-   ============================================ */
-.decision-log {
-  margin: 24px 0;
+.price-chart__dot {
+  fill: var(--color-accent);
+  stroke: none;
 }
 
-.decision-log h3 {
-  font-size: 16px;
-  margin-bottom: 16px;
+.price-chart__dot-link {
+  cursor: pointer;
+  outline: none;
 }
 
-.decision-log__list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.price-chart__dot-hit-area {
+  fill: transparent;
+  stroke: transparent;
 }
 
-.decision-entry {
+.price-chart__dot-link:hover .price-chart__dot,
+.price-chart__dot-link:focus .price-chart__dot {
+  fill: var(--color-accent-hover);
+  stroke: var(--color-text);
+  stroke-width: 2;
+}
+
+.price-chart__dot--unavailable .price-chart__dot {
+  fill: var(--color-text-muted);
+  opacity: 0.55;
+}
+
+.price-chart__tooltip {
+  max-width: 300px;
+  padding: 12px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 16px;
-  text-align: left;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+  color: var(--color-text);
 }
 
-.decision-entry__header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.price-chart__tooltip-title {
   margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
-.decision-entry__action {
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  padding: 3px 10px;
-  border-radius: 99px;
-}
-
-.decision-entry__confidence {
   font-size: 13px;
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
+  font-weight: 600;
+  line-height: 1.35;
 }
 
-.decision-entry__time {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  margin-left: auto;
-}
-
-.decision-entry__reasoning {
-  font-size: 14px;
-  color: var(--color-text-muted);
-  line-height: 1.5;
+.price-chart__tooltip-details {
+  display: grid;
+  gap: 4px;
   margin: 0;
+  font-size: 12px;
+}
+
+.price-chart__tooltip-details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.price-chart__tooltip-details dt {
+  color: var(--color-text-muted);
+}
+
+.price-chart__tooltip-details dd {
+  margin: 0;
+  text-align: right;
+}
+
+.price-chart__tooltip-link-state {
+  margin-top: 10px;
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.price-chart__tooltip-note {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
 }
 
 /* ============================================

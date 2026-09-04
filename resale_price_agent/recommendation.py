@@ -34,6 +34,16 @@ SKIP_RISING_PRICE_PCT = 15.0   # 15% rising price trend
 STALE_HOURS = 72
 
 
+def _history_label(span_days: float) -> str:
+    """Human-friendly label for history_span_days."""
+    days = int(span_days)
+    if days < 1:
+        return "< 1 day"
+    if days == 1:
+        return "1 day"
+    return f"{days} days"
+
+
 @dataclass(frozen=True)
 class Recommendation:
     """Result of the deterministic rule engine."""
@@ -115,6 +125,7 @@ def evaluate(signals: TrendSignals) -> Recommendation:
             conf += 0.05
         conf = min(conf, 0.90)
 
+        history = _history_label(signals.history_span_days)
         return Recommendation(
             action="buy_now",
             confidence=conf,
@@ -123,7 +134,8 @@ def evaluate(signals: TrendSignals) -> Recommendation:
                 f"{discount_pct:.0%} below historical "
                 f"${signals.historical_median:.2f} "
                 f"({signals.price_trend} prices, "
-                f"{signals.listing_trend} supply)."
+                f"{signals.listing_trend} supply). "
+                f"Based on {history} of data."
             ),
             ruleset_version=RULESET_VERSION,
             signals_snapshot=snapshot,
@@ -159,10 +171,11 @@ def evaluate(signals: TrendSignals) -> Recommendation:
             reasons.append(
                 f"prices rising {signals.price_trend_pct:.0f}%"
             )
+        history = _history_label(signals.history_span_days)
         return Recommendation(
             action="skip",
             confidence=conf,
-            reasoning="; ".join(reasons) + ".",
+            reasoning="; ".join(reasons) + f". Based on {history} of data.",
             ruleset_version=RULESET_VERSION,
             signals_snapshot=snapshot,
         )
@@ -177,12 +190,14 @@ def evaluate(signals: TrendSignals) -> Recommendation:
         conf += 0.05
     conf = min(conf, 0.60)
 
+    history = _history_label(signals.history_span_days)
     return Recommendation(
         action="wait",
         confidence=conf,
         reasoning=(
             f"No strong signal ({signals.price_trend} prices, "
-            f"{signals.listing_trend} supply)."
+            f"{signals.listing_trend} supply). "
+            f"Based on {history} of data."
         ),
         ruleset_version=RULESET_VERSION,
         signals_snapshot=snapshot,

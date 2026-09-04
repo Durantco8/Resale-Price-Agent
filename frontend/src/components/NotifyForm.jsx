@@ -68,7 +68,7 @@ export default function NotifyForm({ trackedItemId }) {
             value={conditionType}
             onChange={(e) => setConditionType(e.target.value)}
           >
-            <option value="buy_now">AI recommends "Buy Now"</option>
+            <option value="buy_now">Recommends "Buy Now"</option>
             <option value="price_below">Price drops below...</option>
           </select>
         </div>

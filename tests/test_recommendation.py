@@ -19,6 +19,7 @@ from resale_price_agent.db import (
 from resale_price_agent.recommendation import (
     RULESET_VERSION,
     Recommendation,
+    _history_label,
     evaluate,
     get_latest_deterministic_recommendation,
     record_recommendation,
@@ -377,6 +378,66 @@ class TestRecommendationMetadata:
         rec = evaluate(_signals())
         assert isinstance(rec.reasoning, str)
         assert len(rec.reasoning) > 0
+
+
+class TestHistoryLabel:
+    """_history_label returns human-friendly duration strings."""
+
+    def test_less_than_one_day(self):
+        assert _history_label(0.5) == "< 1 day"
+
+    def test_exactly_one_day(self):
+        assert _history_label(1.0) == "1 day"
+
+    def test_rounds_down_to_one(self):
+        assert _history_label(1.9) == "1 day"
+
+    def test_multiple_days(self):
+        assert _history_label(3.7) == "3 days"
+
+    def test_two_weeks(self):
+        assert _history_label(14.0) == "14 days"
+
+    def test_zero(self):
+        assert _history_label(0.0) == "< 1 day"
+
+
+class TestReasoningIncludesHistory:
+    """Gates 2-4 reasoning text includes actual history duration."""
+
+    def test_buy_reasoning_includes_history(self):
+        rec = evaluate(_signals(
+            latest_batch_median=85.0, historical_median=100.0,
+            price_trend="falling", history_span_days=1.2,
+        ))
+        assert rec.action == "buy_now"
+        assert "1 day" in rec.reasoning
+
+    def test_skip_reasoning_includes_history(self):
+        rec = evaluate(_signals(
+            latest_batch_median=125.0, historical_median=100.0,
+            price_trend="rising", price_trend_pct=18.0,
+            history_span_days=3.5,
+        ))
+        assert rec.action == "skip"
+        assert "3 days" in rec.reasoning
+
+    def test_wait_reasoning_includes_history(self):
+        rec = evaluate(_signals(
+            latest_batch_median=100.0, historical_median=100.0,
+            price_trend="flat", listing_trend="flat",
+            history_span_days=7.0,
+        ))
+        assert rec.action == "wait"
+        assert "7 days" in rec.reasoning
+
+    def test_short_history_shows_less_than_one_day(self):
+        rec = evaluate(_signals(
+            latest_batch_median=100.0, historical_median=100.0,
+            price_trend="flat", history_span_days=0.3,
+        ))
+        assert rec.action == "wait"
+        assert "< 1 day" in rec.reasoning
 
 
 # ===================================================================
