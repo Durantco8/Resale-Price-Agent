@@ -110,14 +110,32 @@ export default function PriceChart({ snapshots }) {
   const data = buildChartData(snapshots);
   if (data.length === 0) return null;
 
+  // Sort chronologically so the line connects in time order
+  const sorted = [...data].sort((a, b) => a.timestamp - b.timestamp);
+
+  const timestamps = sorted.map((d) => d.timestamp);
+  const spanHours = (Math.max(...timestamps) - Math.min(...timestamps)) / 3600000;
+
+  function formatXTick(ts) {
+    const d = new Date(ts);
+    if (spanHours < 36) {
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
   return (
     <div className="price-chart">
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+        <LineChart data={sorted} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
-            dataKey="date"
+            dataKey="timestamp"
+            type="number"
+            scale="time"
+            domain={['dataMin', 'dataMax']}
+            tickFormatter={formatXTick}
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
           />
           <YAxis
