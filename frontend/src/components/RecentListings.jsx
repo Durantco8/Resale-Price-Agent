@@ -10,9 +10,10 @@ export default function RecentListings({ snapshots, labels }) {
       byId[s.ebay_item_id] = s;
     }
   }
-  const batch = Object.values(byId)
-    .sort((a, b) => a.price - b.price)
-    .slice(0, 20);
+  const all = Object.values(byId).sort((a, b) => a.price - b.price);
+  // Prefer listings with images, fall back to imageless if needed
+  const withImages = all.filter((s) => s.image_url);
+  const batch = (withImages.length > 0 ? withImages : all).slice(0, 20);
 
   if (batch.length === 0) return null;
 
