@@ -1,4 +1,4 @@
-export default function RecentListings({ snapshots, labels, fallbackImage }) {
+export default function RecentListings({ snapshots, labels }) {
   if (!snapshots || snapshots.length === 0) return null;
 
   // Keep only the most recent snapshot per unique ebay_item_id
@@ -39,9 +39,9 @@ export default function RecentListings({ snapshots, labels, fallbackImage }) {
               className="listing-card"
             >
               <div className="listing-card__image-wrap">
-                {(s.image_url || fallbackImage) ? (
+                {s.image_url ? (
                   <img
-                    src={s.image_url || fallbackImage}
+                    src={s.image_url}
                     alt={s.title || 'Listing'}
                     className="listing-card__image"
                   />
