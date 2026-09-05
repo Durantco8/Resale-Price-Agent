@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer,
 } from 'recharts';
 
@@ -13,7 +13,7 @@ import {
 } from './priceChartUtils';
 
 
-export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
+export function ClickableListingDot({ cx, cy, payload, radius = 3, onHover, onLeave }) {
   if (cx == null || cy == null || !payload) return null;
 
   const visibleDot = (
@@ -25,9 +25,22 @@ export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
     />
   );
 
+  // Invisible larger circle for easier hover/click targeting
+  const hitArea = (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={Math.max(10, radius + 5)}
+      className="price-chart__dot-hit-area"
+      onMouseEnter={() => onHover && onHover(payload, cx, cy)}
+      onMouseLeave={() => onLeave && onLeave()}
+    />
+  );
+
   if (!payload.itemUrl) {
     return (
       <g className="price-chart__dot--unavailable" aria-label="Listing link unavailable">
+        {hitArea}
         {visibleDot}
       </g>
     );
@@ -42,12 +55,7 @@ export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
       aria-label={`Open ${listingName} on eBay`}
       className="price-chart__dot-link"
     >
-      <circle
-        cx={cx}
-        cy={cy}
-        r={Math.max(10, radius + 5)}
-        className="price-chart__dot-hit-area"
-      />
+      {hitArea}
       {visibleDot}
     </a>
   );
@@ -94,48 +102,40 @@ export function ListingTooltip({ active, payload }) {
 }
 
 
-function renderDot(props) {
-  return <ClickableListingDot {...props} />;
-}
-
-
-function renderActiveDot(props) {
-  return <ClickableListingDot {...props} radius={5} />;
-}
-
-
 export default function PriceChart({ snapshots }) {
+  const [hovered, setHovered] = useState(null);
+
+  const onDotHover = useCallback((point, cx, cy) => {
+    setHovered({ point, cx, cy });
+  }, []);
+
+  const onDotLeave = useCallback(() => {
+    setHovered(null);
+  }, []);
+
   if (!snapshots || snapshots.length === 0) return null;
 
   const data = buildChartData(snapshots);
   if (data.length === 0) return null;
 
-  // Sort chronologically so the line connects in time order
-  const sorted = [...data].sort((a, b) => a.timestamp - b.timestamp);
-
-  const timestamps = sorted.map((d) => d.timestamp);
-  const spanHours = (Math.max(...timestamps) - Math.min(...timestamps)) / 3600000;
-
-  function formatXTick(ts) {
-    const d = new Date(ts);
-    if (spanHours < 36) {
-      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    }
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  function renderDot(props) {
+    return (
+      <ClickableListingDot
+        {...props}
+        onHover={onDotHover}
+        onLeave={onDotLeave}
+      />
+    );
   }
 
   return (
-    <div className="price-chart">
+    <div className="price-chart" style={{ position: 'relative' }}>
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={sorted} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+        <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
-            dataKey="timestamp"
-            type="number"
-            scale="time"
-            domain={['dataMin', 'dataMax']}
-            tickFormatter={formatXTick}
+            dataKey="date"
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
           />
           <YAxis
@@ -143,17 +143,54 @@ export default function PriceChart({ snapshots }) {
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
             width={60}
           />
-          <Tooltip content={<ListingTooltip />} />
           <Line
             type="linear"
             dataKey="price"
             stroke="var(--color-accent)"
             strokeWidth={2}
             dot={renderDot}
-            activeDot={renderActiveDot}
+            activeDot={false}
+            isAnimationActive={false}
           />
         </LineChart>
       </ResponsiveContainer>
+      {hovered && (
+        <div
+          className="price-chart__tooltip"
+          style={{
+            position: 'absolute',
+            left: hovered.cx + 12,
+            top: hovered.cy - 10,
+            pointerEvents: 'none',
+            zIndex: 10,
+          }}
+        >
+          <p className="price-chart__tooltip-title">
+            {hovered.point.title || 'Untitled listing'}
+          </p>
+          <dl className="price-chart__tooltip-details">
+            <div>
+              <dt>Price</dt>
+              <dd>{formatMoney(hovered.point.price, hovered.point.currency)}</dd>
+            </div>
+            <div>
+              <dt>Shipping</dt>
+              <dd>{formatShipping(hovered.point.shippingCost, hovered.point.currency)}</dd>
+            </div>
+            <div>
+              <dt>Condition</dt>
+              <dd>{hovered.point.condition || 'Unknown condition'}</dd>
+            </div>
+            <div>
+              <dt>Observed</dt>
+              <dd>{formatTooltipTimestamp(hovered.point.timestamp)}</dd>
+            </div>
+          </dl>
+          <p className="price-chart__tooltip-link-state">
+            {hovered.point.itemUrl ? 'Click point to open listing' : 'Listing link unavailable'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
