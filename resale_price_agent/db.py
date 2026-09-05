@@ -393,6 +393,30 @@ def get_seeded_items(engine) -> list[dict]:
         return [dict(r._mapping) for r in rows]
 
 
+def backfill_snapshot_images(engine, item_id: int, image_map: dict) -> int:
+    """Update image_url on snapshots that have NULL image_url.
+
+    *image_map* maps ebay_item_id → image_url.
+    Returns number of rows updated.
+    """
+    if not image_map:
+        return 0
+    updated = 0
+    with engine.begin() as conn:
+        for ebay_id, url in image_map.items():
+            if not url:
+                continue
+            result = conn.execute(
+                snapshots.update()
+                .where(snapshots.c.tracked_item_id == item_id)
+                .where(snapshots.c.ebay_item_id == ebay_id)
+                .where(snapshots.c.image_url.is_(None))
+                .values(image_url=url)
+            )
+            updated += result.rowcount
+    return updated
+
+
 def update_tracked_item_image(engine, item_id: int, image_url: str) -> bool:
     """Set image_url on a tracked item if it's currently NULL."""
     with engine.begin() as conn:

@@ -15,6 +15,7 @@ import uuid
 
 from resale_price_agent.alerts import process_alerts
 from resale_price_agent.db import (
+    backfill_snapshot_images,
     get_all_tracked_items,
     get_decisions_for_item,
     get_seen_ebay_ids,
@@ -193,6 +194,21 @@ def poll_all_items(
                     first_image = listings[0].image_url
                     if first_image:
                         update_tracked_item_image(engine, item_id, first_image)
+
+                # Backfill image_url on existing snapshots missing images
+                image_map = {
+                    s.item_id: s.image_url
+                    for s in listings if s.image_url
+                }
+                if image_map:
+                    filled = backfill_snapshot_images(
+                        engine, item_id, image_map,
+                    )
+                    if filled:
+                        log.info(
+                            "  #%d — backfilled images on %d snapshot(s)",
+                            item_id, filled,
+                        )
 
                 # Deduplicate: only store listings not already seen
                 seen_ids = get_seen_ebay_ids(engine, item_id)
