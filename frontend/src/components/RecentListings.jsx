@@ -27,7 +27,7 @@ export default function RecentListings({ snapshots, labels }) {
 
   return (
     <div className="recent-listings">
-      <h3>Current Listings</h3>
+      <h3>Recent Listings Tracked (Last 20)</h3>
       <div className="listings-grid">
         {batch.map((s) => {
           const labelInfo = labelMap[s.ebay_item_id];
