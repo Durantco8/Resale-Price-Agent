@@ -98,7 +98,7 @@ export default function ItemPage() {
           />
           <ListingStats signals={activeSignals} conditionLabel={activeCondition} totalListings={filteredSnapshots.length} />
           <PriceChart snapshots={filteredSnapshots} />
-          <RecentListings snapshots={filteredSnapshots} labels={listing_labels} />
+          <RecentListings snapshots={filteredSnapshots} labels={listing_labels} fallbackImage={tracked_item.image_url} />
         </>
       )}
 
