@@ -86,8 +86,8 @@ export default function ItemPage() {
             onChange={setActiveCondition}
           />
           <ListingStats signals={activeSignals} conditionLabel={activeCondition} />
-          <RecentListings snapshots={filteredSnapshots} labels={listing_labels} />
           <PriceChart snapshots={filteredSnapshots} />
+          <RecentListings snapshots={filteredSnapshots} labels={listing_labels} />
         </>
       )}
 

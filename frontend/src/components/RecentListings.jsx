@@ -1,15 +1,18 @@
 export default function RecentListings({ snapshots, labels }) {
   if (!snapshots || snapshots.length === 0) return null;
 
-  // Find the most recent snapshot_time, then grab all listings from that batch
-  const latest = snapshots.reduce((a, b) =>
-    (a.snapshot_time > b.snapshot_time ? a : b)
-  );
-  const latestTime = latest.snapshot_time;
-  const batch = snapshots
-    .filter((s) => s.snapshot_time === latestTime && s.item_url)
+  // Keep only the most recent snapshot per unique ebay_item_id
+  const byId = {};
+  for (const s of snapshots) {
+    if (!s.item_url) continue;
+    const existing = byId[s.ebay_item_id];
+    if (!existing || s.snapshot_time > existing.snapshot_time) {
+      byId[s.ebay_item_id] = s;
+    }
+  }
+  const batch = Object.values(byId)
     .sort((a, b) => a.price - b.price)
-    .slice(0, 10);
+    .slice(0, 20);
 
   if (batch.length === 0) return null;
 
@@ -23,7 +26,7 @@ export default function RecentListings({ snapshots, labels }) {
 
   return (
     <div className="recent-listings">
-      <h3>Recent Listings</h3>
+      <h3>Current Listings</h3>
       <div className="recent-listings__list">
         {batch.map((s) => {
           const labelInfo = labelMap[s.ebay_item_id];
