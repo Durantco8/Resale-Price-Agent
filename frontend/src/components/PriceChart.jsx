@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  ComposedChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
 } from 'recharts';
 
@@ -94,9 +94,13 @@ export function ListingTooltip({ active, payload }) {
 }
 
 
-function renderShape(props) {
-  const { cx, cy, payload } = props;
-  return <ClickableListingDot cx={cx} cy={cy} payload={payload} />;
+function renderDot(props) {
+  return <ClickableListingDot {...props} />;
+}
+
+
+function renderActiveDot(props) {
+  return <ClickableListingDot {...props} radius={5} />;
 }
 
 
@@ -106,52 +110,31 @@ export default function PriceChart({ snapshots }) {
   const data = buildChartData(snapshots);
   if (data.length === 0) return null;
 
-  const timestamps = data.map((d) => d.timestamp);
-  const spanHours = (Math.max(...timestamps) - Math.min(...timestamps)) / 3600000;
-
-  function formatXTick(ts) {
-    const d = new Date(ts);
-    if (spanHours < 36) {
-      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    }
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  }
-
-  // Sort by timestamp so the line connects chronologically
-  const sorted = [...data].sort((a, b) => a.timestamp - b.timestamp);
-
   return (
     <div className="price-chart">
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={sorted} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+        <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
-            dataKey="timestamp"
-            type="number"
-            domain={['dataMin', 'dataMax']}
-            tickFormatter={formatXTick}
+            dataKey="date"
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
-            scale="time"
           />
           <YAxis
-            dataKey="price"
-            type="number"
             tickFormatter={formatYAxisPrice}
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
             width={60}
           />
-          <Tooltip content={<ListingTooltip />} cursor={false} />
+          <Tooltip content={<ListingTooltip />} />
           <Line
+            type="linear"
             dataKey="price"
             stroke="var(--color-accent)"
             strokeWidth={2}
-            dot={false}
-            activeDot={false}
-            type="monotone"
+            dot={renderDot}
+            activeDot={renderActiveDot}
           />
-          <Scatter dataKey="price" shape={renderShape} />
-        </ComposedChart>
+        </LineChart>
       </ResponsiveContainer>
     </div>
   );
