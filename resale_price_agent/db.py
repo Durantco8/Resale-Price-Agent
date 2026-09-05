@@ -45,6 +45,7 @@ tracked_items = Table(
     Column("owner", String, nullable=True, default=None),
     Column("ebay_category_id", String, nullable=True, default=None),
     Column("category", String, nullable=True, default=None),
+    Column("image_url", String, nullable=True, default=None),
     Column("status", String, nullable=False, default="collecting"),
     Column("created_at", DateTime, nullable=False),
     UniqueConstraint("normalized_query", name="uq_tracked_items_normalized_query"),
@@ -76,6 +77,7 @@ snapshots = Table(
     # table rewrite; all application inserts populate it, and the migration
     # backfills every legacy row.
     Column("poll_batch_id", String, nullable=True),
+    Column("image_url", String, nullable=True),
 )
 
 Index(
@@ -389,6 +391,18 @@ def get_seeded_items(engine) -> list[dict]:
             tracked_items.select().where(tracked_items.c.is_seeded == True)  # noqa: E712
         ).fetchall()
         return [dict(r._mapping) for r in rows]
+
+
+def update_tracked_item_image(engine, item_id: int, image_url: str) -> bool:
+    """Set image_url on a tracked item if it's currently NULL."""
+    with engine.begin() as conn:
+        result = conn.execute(
+            tracked_items.update()
+            .where(tracked_items.c.id == item_id)
+            .where(tracked_items.c.image_url.is_(None))
+            .values(image_url=image_url)
+        )
+        return result.rowcount > 0
 
 
 def set_tracked_item_status(engine, item_id: int, status: str) -> bool:

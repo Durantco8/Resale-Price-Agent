@@ -46,6 +46,20 @@ def main():
                 "ALTER TABLE tracked_items ADD COLUMN category VARCHAR"
             ))
         logging.info("Added 'category' column to tracked_items")
+    if "image_url" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE tracked_items ADD COLUMN image_url VARCHAR"
+            ))
+        logging.info("Added 'image_url' column to tracked_items")
+
+    snap_columns = {c["name"] for c in insp.get_columns("snapshots")}
+    if "image_url" not in snap_columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE snapshots ADD COLUMN image_url VARCHAR"
+            ))
+        logging.info("Added 'image_url' column to snapshots")
 
     # Seed new Pokemon items
     result = seed_all(engine)

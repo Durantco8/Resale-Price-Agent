@@ -71,10 +71,21 @@ export default function ItemPage() {
     <div className="item-page">
       <SearchBar />
 
-      <h2 className="item-page__title">{tracked_item.display_name}</h2>
-      <span className={`status-badge status-badge--${status}`}>
-        {status === 'collecting' ? 'Collecting' : 'Active'}
-      </span>
+      <div className="item-page__header">
+        {tracked_item.image_url && (
+          <img
+            src={tracked_item.image_url}
+            alt={tracked_item.display_name}
+            className="item-page__image"
+          />
+        )}
+        <div>
+          <h2 className="item-page__title">{tracked_item.display_name}</h2>
+          <span className={`status-badge status-badge--${status}`}>
+            {status === 'collecting' ? 'Collecting' : 'Active'}
+          </span>
+        </div>
+      </div>
 
       {status === 'collecting' ? (
         <CollectingState snapshotCount={snapshot_count} />

@@ -67,18 +67,27 @@ export default function TrendingGrid() {
               to={`/item/${item.id}`}
               className="trending-card"
             >
-              <div className="trending-card__header">
-                <span className="trending-card__name">{item.display_name}</span>
-                <StatusBadge status={entry.status} />
-              </div>
-              <div className="trending-card__meta">
-                {sig ? (
-                  <span className="trending-card__price">
-                    ${sig.latest_batch_median.toFixed(0)}
-                  </span>
-                ) : (
-                  <span className="trending-card__collecting">Collecting data...</span>
-                )}
+              {item.image_url && (
+                <img
+                  src={item.image_url}
+                  alt={item.display_name}
+                  className="trending-card__image"
+                />
+              )}
+              <div className="trending-card__body">
+                <div className="trending-card__header">
+                  <span className="trending-card__name">{item.display_name}</span>
+                  <StatusBadge status={entry.status} />
+                </div>
+                <div className="trending-card__meta">
+                  {sig ? (
+                    <span className="trending-card__price">
+                      ${sig.latest_batch_median.toFixed(0)}
+                    </span>
+                  ) : (
+                    <span className="trending-card__collecting">Collecting data...</span>
+                  )}
+                </div>
               </div>
             </Link>
           );

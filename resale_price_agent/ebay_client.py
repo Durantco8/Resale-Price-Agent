@@ -35,6 +35,7 @@ class ListingSnapshot:
     item_location: str | None
     buying_options: list[str]
     snapshot_time: str  # ISO-8601 string from the API or our own timestamp
+    image_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +162,7 @@ class EbayClient:
                     snapshot_time=item.get(
                         "itemCreationDate", ""
                     ),
+                    image_url=item.get("image", {}).get("imageUrl"),
                 )
             )
         return results

@@ -27,43 +27,49 @@ export default function RecentListings({ snapshots, labels }) {
   return (
     <div className="recent-listings">
       <h3>Current Listings</h3>
-      <div className="recent-listings__list">
+      <div className="listings-grid">
         {batch.map((s) => {
           const labelInfo = labelMap[s.ebay_item_id];
           return (
-            <div key={s.id} className="listing-row">
-              <div className="listing-row__info">
-                <span className="listing-row__price">
+            <a
+              key={s.id}
+              href={s.item_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="listing-card"
+            >
+              <div className="listing-card__image-wrap">
+                {s.image_url ? (
+                  <img
+                    src={s.image_url}
+                    alt={s.title || 'Listing'}
+                    className="listing-card__image"
+                  />
+                ) : (
+                  <div className="listing-card__placeholder" />
+                )}
+              </div>
+              <div className="listing-card__details">
+                <span className="listing-card__price">
                   ${s.price.toFixed(2)}
                 </span>
                 {labelInfo && (
                   <span className={`listing-label listing-label--${labelClass(labelInfo.label)}`}>
                     {labelInfo.label}
-                    <span className="listing-label__pct">
-                      {labelInfo.vs_median_pct > 0 ? '+' : ''}{labelInfo.vs_median_pct.toFixed(0)}% vs median
-                    </span>
                   </span>
                 )}
-                <span className="listing-row__detail">
-                  {s.condition || 'Unknown condition'}
+                <span className="listing-card__condition">
+                  {s.condition || 'Unknown'}
                 </span>
                 {s.shipping_cost != null && (
-                  <span className="listing-row__detail">
+                  <span className="listing-card__shipping">
                     {s.shipping_cost === 0
                       ? 'Free shipping'
-                      : `$${s.shipping_cost.toFixed(2)} shipping`}
+                      : `+$${s.shipping_cost.toFixed(2)}`}
                   </span>
                 )}
               </div>
-              <a
-                href={s.item_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn--secondary listing-row__link"
-              >
-                View on eBay
-              </a>
-            </div>
+            </a>
           );
         })}
       </div>

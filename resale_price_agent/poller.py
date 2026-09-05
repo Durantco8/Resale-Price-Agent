@@ -21,6 +21,7 @@ from resale_price_agent.db import (
     get_snapshots_for_item,
     insert_snapshots,
     set_tracked_item_status,
+    update_tracked_item_image,
 )
 from resale_price_agent.ebay_client import ListingSnapshot
 from resale_price_agent.llm_reasoning import get_llm_decision
@@ -61,6 +62,7 @@ def snapshot_to_dict(snap: ListingSnapshot) -> dict:
             ", ".join(snap.buying_options) if snap.buying_options else None
         ),
         "item_url": snap.item_url,
+        "image_url": snap.image_url,
     }
 
 
@@ -185,6 +187,12 @@ def poll_all_items(
                 )
                 snapshot_dicts = [snapshot_to_dict(s) for s in listings]
                 snapshot_dicts = filter_outliers(engine, item_id, snapshot_dicts)
+
+                # Save a generic card image from the first listing
+                if not item.get("image_url") and listings:
+                    first_image = listings[0].image_url
+                    if first_image:
+                        update_tracked_item_image(engine, item_id, first_image)
 
                 # Deduplicate: only store listings not already seen
                 seen_ids = get_seen_ebay_ids(engine, item_id)

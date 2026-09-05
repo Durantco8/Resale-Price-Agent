@@ -317,14 +317,30 @@ p {
 }
 
 .trending-card {
-  display: block;
-  padding: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   text-decoration: none;
   color: var(--color-text);
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.trending-card__image {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: var(--color-border);
+}
+
+.trending-card__body {
+  flex: 1;
+  min-width: 0;
 }
 .trending-card:hover {
   text-decoration: none;
@@ -491,6 +507,22 @@ p {
   margin-bottom: 32px;
 }
 
+.item-page__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 8px;
+}
+
+.item-page__image {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: var(--color-border);
+}
+
 .item-page__title {
   font-size: 28px;
   font-weight: 700;
@@ -603,7 +635,7 @@ p {
 }
 
 /* ============================================
-   Recent Listings
+   Current Listings (Grid with Thumbnails)
    ============================================ */
 .recent-listings {
   margin: 24px 0;
@@ -614,64 +646,82 @@ p {
   margin-bottom: 12px;
 }
 
-.recent-listings__list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.listings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
 }
 
-.listing-row {
+.listing-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
+  flex-direction: column;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  transition: border-color 0.15s;
+  text-decoration: none;
+  color: var(--color-text);
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.listing-row:hover {
+.listing-card:hover {
+  text-decoration: none;
   border-color: var(--color-accent);
+  box-shadow: 0 4px 12px var(--color-shadow);
 }
 
-.listing-row__info {
+.listing-card__image-wrap {
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--color-border);
+}
+
+.listing-card__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.listing-card__placeholder {
+  width: 100%;
+  height: 100%;
+  background: var(--color-border);
+}
+
+.listing-card__details {
+  padding: 10px 12px;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.listing-row__price {
-  font-size: 18px;
+.listing-card__price {
+  font-size: 16px;
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--color-text);
-  white-space: nowrap;
 }
 
-.listing-row__detail {
-  font-size: 13px;
+.listing-card__condition {
+  font-size: 12px;
   color: var(--color-text-muted);
-  white-space: nowrap;
 }
 
-.listing-row__link {
-  flex-shrink: 0;
-  font-size: 13px;
-  padding: 6px 14px;
+.listing-card__shipping {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 900px) {
+  .listings-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 @media (max-width: 640px) {
-  .listing-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  .listing-row__link {
-    align-self: flex-end;
+  .listings-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
