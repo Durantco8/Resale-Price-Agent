@@ -1,4 +1,4 @@
-export default function ListingStats({ signals }) {
+export default function ListingStats({ signals, totalListings }) {
   if (!signals) return null;
 
   if (!signals.sufficient_data) {
@@ -27,7 +27,7 @@ export default function ListingStats({ signals }) {
       </div>
       <div className="stat-card">
         <span className="stat-card__label">Listings</span>
-        <span className="stat-card__value">{signals.latest_batch_listing_count}</span>
+        <span className="stat-card__value">{totalListings != null ? totalListings : signals.latest_batch_listing_count}</span>
       </div>
       <div className="stat-card stat-card--secondary">
         <span className="stat-card__label">All-Time Low</span>
