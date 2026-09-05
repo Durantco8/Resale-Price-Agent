@@ -1,6 +1,7 @@
 import React from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Cell,
 } from 'recharts';
 
 import {
@@ -93,13 +94,9 @@ export function ListingTooltip({ active, payload }) {
 }
 
 
-function renderDot(props) {
-  return <ClickableListingDot {...props} />;
-}
-
-
-function renderActiveDot(props) {
-  return <ClickableListingDot {...props} radius={5} />;
+function renderShape(props) {
+  const { cx, cy, payload } = props;
+  return <ClickableListingDot cx={cx} cy={cy} payload={payload} />;
 }
 
 
@@ -109,31 +106,46 @@ export default function PriceChart({ snapshots }) {
   const data = buildChartData(snapshots);
   if (data.length === 0) return null;
 
+  const timestamps = data.map((d) => d.timestamp);
+  const spanHours = (Math.max(...timestamps) - Math.min(...timestamps)) / 3600000;
+
+  function formatXTick(ts) {
+    const d = new Date(ts);
+    if (spanHours < 36) {
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
   return (
     <div className="price-chart">
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+        <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
-            dataKey="date"
+            dataKey="timestamp"
+            type="number"
+            domain={['dataMin', 'dataMax']}
+            tickFormatter={formatXTick}
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
+            name="Time"
           />
           <YAxis
+            dataKey="price"
+            type="number"
             tickFormatter={formatYAxisPrice}
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
             width={60}
+            name="Price"
           />
-          <Tooltip content={<ListingTooltip />} />
-          <Line
-            type="monotone"
-            dataKey="price"
-            stroke="var(--color-accent)"
-            strokeWidth={2}
-            dot={renderDot}
-            activeDot={renderActiveDot}
-          />
-        </LineChart>
+          <Tooltip content={<ListingTooltip />} cursor={false} />
+          <Scatter data={data} shape={renderShape}>
+            {data.map((entry) => (
+              <Cell key={entry.snapshotId} fill="var(--color-accent)" />
+            ))}
+          </Scatter>
+        </ScatterChart>
       </ResponsiveContainer>
     </div>
   );
