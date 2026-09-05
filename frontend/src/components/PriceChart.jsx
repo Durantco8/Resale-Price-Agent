@@ -1,7 +1,7 @@
 import React from 'react';
 import {
-  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Cell,
+  ComposedChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer,
 } from 'recharts';
 
 import {
@@ -117,11 +117,14 @@ export default function PriceChart({ snapshots }) {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
+  // Sort by timestamp so the line connects chronologically
+  const sorted = [...data].sort((a, b) => a.timestamp - b.timestamp);
+
   return (
     <div className="price-chart">
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+        <ComposedChart data={sorted} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
             dataKey="timestamp"
@@ -129,7 +132,7 @@ export default function PriceChart({ snapshots }) {
             domain={['dataMin', 'dataMax']}
             tickFormatter={formatXTick}
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
-            name="Time"
+            scale="time"
           />
           <YAxis
             dataKey="price"
@@ -137,15 +140,18 @@ export default function PriceChart({ snapshots }) {
             tickFormatter={formatYAxisPrice}
             tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
             width={60}
-            name="Price"
           />
           <Tooltip content={<ListingTooltip />} cursor={false} />
-          <Scatter data={data} shape={renderShape}>
-            {data.map((entry) => (
-              <Cell key={entry.snapshotId} fill="var(--color-accent)" />
-            ))}
-          </Scatter>
-        </ScatterChart>
+          <Line
+            dataKey="price"
+            stroke="var(--color-accent)"
+            strokeWidth={2}
+            dot={false}
+            activeDot={false}
+            type="monotone"
+          />
+          <Scatter dataKey="price" shape={renderShape} />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
