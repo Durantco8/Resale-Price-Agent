@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { suggestItems, requestCard } from '../api';
 
 export default function SearchBar({ large = false }) {
@@ -9,6 +9,15 @@ export default function SearchBar({ large = false }) {
   const [results, setResults] = useState(null); // null = no search yet, [] = no matches
   const [activeIndex, setActiveIndex] = useState(-1);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Clear search state when navigating (e.g. clicking logo)
+  useEffect(() => {
+    setQuery('');
+    setSuggestions([]);
+    setShowDropdown(false);
+    setResults(null);
+  }, [location.key]);
   const wrapRef = useRef(null);
   const debounceRef = useRef(null);
 
