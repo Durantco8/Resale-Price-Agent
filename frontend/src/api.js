@@ -33,6 +33,14 @@ export function createAlert({ email, tracked_item_id, condition }) {
   });
 }
 
+export function requestCard(cardName) {
+  return request('/api/request-card', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ card_name: cardName }),
+  });
+}
+
 export function unsubscribe(token) {
   return request(`/api/unsubscribe/${token}`);
 }

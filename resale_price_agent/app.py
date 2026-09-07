@@ -26,6 +26,7 @@ from resale_price_agent.db import (
     unsubscribe_by_token,
 )
 from resale_price_agent.conditions import label_listings
+from resale_price_agent.notifier import send_email, NOTIFY_TO
 from resale_price_agent.signals import compute_signals, compute_signals_by_condition
 
 
@@ -137,6 +138,32 @@ def create_app(config=None):
             "condition": alert["condition"],
             "active": alert["active"],
         }), 201
+
+    @app.route("/api/request-card", methods=["POST"])
+    @limiter.limit(alert_limit)
+    def api_request_card():
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "Request body must be JSON."}), 400
+
+        card_name = (data.get("card_name") or "").strip()
+        if not card_name:
+            return jsonify({"error": "Card name is required."}), 400
+
+        send_fn = app.config.get("REQUEST_SEND_FN", send_email)
+        recipient = NOTIFY_TO
+        if not recipient:
+            return jsonify({"error": "Requests are not configured yet."}), 503
+
+        subject = f"Card tracking request: {card_name}"
+        body = f"A user has requested tracking for:\n\n{card_name}"
+
+        try:
+            send_fn(recipient, subject, body)
+        except Exception:
+            return jsonify({"error": "Failed to send request. Please try again later."}), 500
+
+        return jsonify({"message": "Request submitted successfully."}), 201
 
     @app.route("/api/unsubscribe/<token>")
     def api_unsubscribe(token):

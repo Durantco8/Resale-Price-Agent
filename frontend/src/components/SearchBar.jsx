@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { suggestItems } from '../api';
+import { suggestItems, requestCard } from '../api';
 
 export default function SearchBar({ large = false }) {
   const [query, setQuery] = useState('');
@@ -165,11 +165,57 @@ export default function SearchBar({ large = false }) {
       )}
 
       {results !== null && results.length === 0 && (
-        <div className="search-results search-results--empty">
-          <p className="search-results__not-found">
-            No tracked items match &ldquo;{query}&rdquo;
-          </p>
+        <NoResultsCard query={query} />
+      )}
+    </div>
+  );
+}
+
+
+function NoResultsCard({ query }) {
+  const [requestStatus, setRequestStatus] = useState('idle'); // idle | sending | sent | error
+
+  async function handleRequest() {
+    setRequestStatus('sending');
+    try {
+      await requestCard(query);
+      setRequestStatus('sent');
+    } catch {
+      setRequestStatus('error');
+    }
+  }
+
+  return (
+    <div className="no-results">
+      <div className="no-results__icon">&#128269;</div>
+      <h3 className="no-results__title">No results found</h3>
+      <p className="no-results__message">
+        &ldquo;{query}&rdquo; isn&rsquo;t currently being tracked.
+      </p>
+
+      {requestStatus === 'sent' ? (
+        <div className="no-results__success">
+          <span className="no-results__check">&#10003;</span>
+          <p>Request submitted! We&rsquo;ll review and may add this card soon.</p>
         </div>
+      ) : (
+        <>
+          <p className="no-results__cta">
+            Want us to track this card? Submit a request and we&rsquo;ll review it.
+          </p>
+          <button
+            className="no-results__request-btn"
+            onClick={handleRequest}
+            disabled={requestStatus === 'sending'}
+          >
+            {requestStatus === 'sending' ? 'Submitting...' : 'Request Tracking'}
+          </button>
+          {requestStatus === 'error' && (
+            <p className="no-results__error">
+              Something went wrong. Please try again.
+            </p>
+          )}
+        </>
       )}
     </div>
   );
