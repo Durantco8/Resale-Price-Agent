@@ -151,8 +151,8 @@ export default function PriceChart({ snapshots }) {
           className="price-chart__tooltip"
           style={{
             position: 'absolute',
-            left: hovered.cx + 12,
-            top: hovered.cy - 10,
+            left: hovered.cx + 24,
+            top: hovered.cy - 40,
             pointerEvents: 'none',
             zIndex: 10,
           }}
