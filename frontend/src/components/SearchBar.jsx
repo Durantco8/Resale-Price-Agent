@@ -6,6 +6,7 @@ export default function SearchBar({ large = false }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [results, setResults] = useState(null); // null = no search yet, [] = no matches
   const [activeIndex, setActiveIndex] = useState(-1);
   const navigate = useNavigate();
   const wrapRef = useRef(null);
@@ -23,9 +24,10 @@ export default function SearchBar({ large = false }) {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       try {
-        const results = await suggestItems(q);
-        setSuggestions(results);
-        setShowDropdown(results.length > 0);
+        const items = await suggestItems(q);
+        setSuggestions(items);
+        // Only show dropdown if we haven't submitted a search yet
+        if (items.length > 0) setShowDropdown(true);
         setActiveIndex(-1);
       } catch {
         setSuggestions([]);
@@ -51,6 +53,7 @@ export default function SearchBar({ large = false }) {
     setQuery('');
     setSuggestions([]);
     setShowDropdown(false);
+    setResults(null);
     navigate(`/item/${item.id}`);
   }
 
@@ -69,37 +72,53 @@ export default function SearchBar({ large = false }) {
     }
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    // If there are suggestions and user hits Enter without selecting, go to first result
-    if (suggestions.length > 0) {
-      selectItem(suggestions[0]);
+    const q = query.trim();
+    if (!q) return;
+
+    // If user selected a suggestion with arrow keys, go there
+    if (activeIndex >= 0 && suggestions[activeIndex]) {
+      selectItem(suggestions[activeIndex]);
+      return;
+    }
+
+    // Otherwise, fetch and show all results below
+    setShowDropdown(false);
+    try {
+      const items = await suggestItems(q);
+      setResults(items);
+    } catch {
+      setResults([]);
     }
   }
 
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className={`search-bar ${large ? 'search-bar--large' : ''}`}
-      ref={wrapRef}
-    >
-      <div className="search-bar__input-wrap">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
-          onKeyDown={handleKeyDown}
-          placeholder='Search tracked items (e.g. "Charizard Base Set")'
-          autoFocus={large}
-          autoComplete="off"
-        />
-        <button type="submit" disabled={!query.trim()}>
-          Search
-        </button>
-      </div>
+  function handleInputChange(e) {
+    setQuery(e.target.value);
+    setResults(null); // Clear search results when typing again
+  }
 
-      {showDropdown && (
+  return (
+    <div className={`search-bar ${large ? 'search-bar--large' : ''}`} ref={wrapRef}>
+      <form onSubmit={handleSubmit}>
+        <div className="search-bar__input-wrap">
+          <input
+            type="text"
+            value={query}
+            onChange={handleInputChange}
+            onFocus={() => suggestions.length > 0 && !results && setShowDropdown(true)}
+            onKeyDown={handleKeyDown}
+            placeholder='Search tracked items (e.g. "Charizard Base Set")'
+            autoFocus={large}
+            autoComplete="off"
+          />
+          <button type="submit" disabled={!query.trim()}>
+            Search
+          </button>
+        </div>
+      </form>
+
+      {showDropdown && !results && (
         <ul className="search-bar__dropdown">
           {suggestions.map((item, i) => (
             <li
@@ -120,6 +139,38 @@ export default function SearchBar({ large = false }) {
           ))}
         </ul>
       )}
-    </form>
+
+      {results !== null && results.length > 0 && (
+        <div className="search-results">
+          <h3 className="search-results__heading">
+            {results.length} result{results.length !== 1 ? 's' : ''} for &ldquo;{query}&rdquo;
+          </h3>
+          <div className="search-results__grid">
+            {results.map((item) => (
+              <button
+                key={item.id}
+                className="search-results__card"
+                onClick={() => selectItem(item)}
+              >
+                {item.image_url ? (
+                  <img src={item.image_url} alt="" className="search-results__card-img" />
+                ) : (
+                  <div className="search-results__card-placeholder" />
+                )}
+                <span className="search-results__card-name">{item.display_name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {results !== null && results.length === 0 && (
+        <div className="search-results search-results--empty">
+          <p className="search-results__not-found">
+            No tracked items match &ldquo;{query}&rdquo;
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
