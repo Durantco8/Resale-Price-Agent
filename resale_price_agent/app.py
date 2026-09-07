@@ -25,8 +25,11 @@ from resale_price_agent.db import (
     suggest_tracked_items,
     unsubscribe_by_token,
 )
+import logging
+import os
+
 from resale_price_agent.conditions import label_listings
-from resale_price_agent.notifier import send_email, NOTIFY_TO
+from resale_price_agent.notifier import send_email
 from resale_price_agent.signals import compute_signals, compute_signals_by_condition
 
 
@@ -151,16 +154,18 @@ def create_app(config=None):
             return jsonify({"error": "Card name is required."}), 400
 
         send_fn = app.config.get("REQUEST_SEND_FN", send_email)
-        recipient = NOTIFY_TO
+        recipient = os.environ.get("NOTIFY_TO", "")
         if not recipient:
             return jsonify({"error": "Requests are not configured yet."}), 503
 
         subject = f"Card tracking request: {card_name}"
         body = f"A user has requested tracking for:\n\n{card_name}"
 
+        log = logging.getLogger(__name__)
         try:
             send_fn(recipient, subject, body)
         except Exception:
+            log.exception("Failed to send card request email for: %s", card_name)
             return jsonify({"error": "Failed to send request. Please try again later."}), 500
 
         return jsonify({"message": "Request submitted successfully."}), 201
