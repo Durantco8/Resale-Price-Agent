@@ -467,6 +467,47 @@ p {
   font-weight: 700;
 }
 
+.no-results__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 400px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.no-results__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.no-results__input,
+.no-results__textarea {
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.no-results__input:focus,
+.no-results__textarea:focus {
+  border-color: var(--color-accent);
+}
+
+.no-results__textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
 .no-results__error {
   margin-top: 10px;
   font-size: 13px;

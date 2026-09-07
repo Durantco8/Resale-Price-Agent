@@ -173,12 +173,22 @@ export default function SearchBar({ large = false }) {
 
 
 function NoResultsCard({ query }) {
-  const [requestStatus, setRequestStatus] = useState('idle'); // idle | sending | sent | error
+  const [requestStatus, setRequestStatus] = useState('idle'); // idle | form | sending | sent | error
+  const [cardName, setCardName] = useState(query);
+  const [details, setDetails] = useState('');
 
-  async function handleRequest() {
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const name = cardName.trim();
+    if (!name) return;
+
+    const message = details.trim()
+      ? `${name}\n\nDetails: ${details.trim()}`
+      : name;
+
     setRequestStatus('sending');
     try {
-      await requestCard(query);
+      await requestCard(message);
       setRequestStatus('sent');
     } catch {
       setRequestStatus('error');
@@ -198,23 +208,53 @@ function NoResultsCard({ query }) {
           <span className="no-results__check">&#10003;</span>
           <p>Request submitted! We&rsquo;ll review and may add this card soon.</p>
         </div>
-      ) : (
-        <>
-          <p className="no-results__cta">
-            Want us to track this card? Submit a request and we&rsquo;ll review it.
-          </p>
+      ) : requestStatus === 'form' || requestStatus === 'sending' || requestStatus === 'error' ? (
+        <form onSubmit={handleSubmit} className="no-results__form">
+          <label className="no-results__label">
+            Full card name *
+            <input
+              type="text"
+              value={cardName}
+              onChange={(e) => setCardName(e.target.value)}
+              placeholder='e.g. "Charizard 4/102 Base Set Holo PSA 9"'
+              className="no-results__input"
+              required
+            />
+          </label>
+          <label className="no-results__label">
+            Additional details
+            <textarea
+              value={details}
+              onChange={(e) => setDetails(e.target.value)}
+              placeholder="Set name, card number, condition, grading, language, etc."
+              className="no-results__textarea"
+              rows={3}
+            />
+          </label>
           <button
+            type="submit"
             className="no-results__request-btn"
-            onClick={handleRequest}
-            disabled={requestStatus === 'sending'}
+            disabled={requestStatus === 'sending' || !cardName.trim()}
           >
-            {requestStatus === 'sending' ? 'Submitting...' : 'Request Tracking'}
+            {requestStatus === 'sending' ? 'Submitting...' : 'Submit Request'}
           </button>
           {requestStatus === 'error' && (
             <p className="no-results__error">
               Something went wrong. Please try again.
             </p>
           )}
+        </form>
+      ) : (
+        <>
+          <p className="no-results__cta">
+            Want us to track this card? Fill out a quick request and we&rsquo;ll review it.
+          </p>
+          <button
+            className="no-results__request-btn"
+            onClick={() => setRequestStatus('form')}
+          >
+            Request Tracking
+          </button>
         </>
       )}
     </div>
