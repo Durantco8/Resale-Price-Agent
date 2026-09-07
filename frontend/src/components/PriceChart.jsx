@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer,
@@ -13,126 +13,103 @@ import {
 } from './priceChartUtils';
 
 
-export function ClickableListingDot({ cx, cy, payload, radius = 3, onHover, onLeave }) {
+/**
+ * Simple visible dot — no hit area, no hover logic.
+ * All hover detection is handled by the chart-level onMouseMove.
+ */
+export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
   if (cx == null || cy == null || !payload) return null;
 
-  const visibleDot = (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={radius}
-      className="price-chart__dot"
-    />
-  );
-
-  // Invisible larger circle for easier hover/click targeting
-  const hitArea = (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={Math.max(10, radius + 5)}
-      className="price-chart__dot-hit-area"
-      onMouseEnter={() => onHover && onHover(payload, cx, cy)}
-      onMouseLeave={() => onLeave && onLeave()}
-    />
+  const dot = (
+    <circle cx={cx} cy={cy} r={radius} className="price-chart__dot" />
   );
 
   if (!payload.itemUrl) {
     return (
       <g className="price-chart__dot--unavailable" aria-label="Listing link unavailable">
-        {hitArea}
-        {visibleDot}
+        {dot}
       </g>
     );
   }
 
-  const listingName = payload.title || 'listing';
   return (
     <a
       href={payload.itemUrl}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={`Open ${listingName} on eBay`}
+      aria-label={`Open ${payload.title || 'listing'} on eBay`}
       className="price-chart__dot-link"
     >
-      {hitArea}
-      {visibleDot}
+      {dot}
     </a>
-  );
-}
-
-
-export function ListingTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null;
-
-  const point = payload[0].payload;
-  return (
-    <div className="price-chart__tooltip">
-      <p className="price-chart__tooltip-title">
-        {point.title || 'Untitled listing'}
-      </p>
-      <dl className="price-chart__tooltip-details">
-        <div>
-          <dt>Price</dt>
-          <dd>{formatMoney(point.price, point.currency)}</dd>
-        </div>
-        <div>
-          <dt>Shipping</dt>
-          <dd>{formatShipping(point.shippingCost, point.currency)}</dd>
-        </div>
-        <div>
-          <dt>Condition</dt>
-          <dd>{point.condition || 'Unknown condition'}</dd>
-        </div>
-        <div>
-          <dt>Observed</dt>
-          <dd>{formatTooltipTimestamp(point.timestamp)}</dd>
-        </div>
-      </dl>
-      <p className="price-chart__tooltip-link-state">
-        {point.itemUrl ? 'Click point to open listing' : 'Listing link unavailable'}
-      </p>
-      {point.itemUrl && (
-        <p className="price-chart__tooltip-note">
-          Historical listings may no longer be active.
-        </p>
-      )}
-    </div>
   );
 }
 
 
 export default function PriceChart({ snapshots }) {
   const [hovered, setHovered] = useState(null);
-
-  const onDotHover = useCallback((point, cx, cy) => {
-    setHovered({ point, cx, cy });
-  }, []);
-
-  const onDotLeave = useCallback(() => {
-    setHovered(null);
-  }, []);
+  // Store rendered dot positions so we can find the nearest on mousemove
+  const dotPositionsRef = useRef([]);
 
   if (!snapshots || snapshots.length === 0) return null;
 
   const data = buildChartData(snapshots);
   if (data.length === 0) return null;
 
+  /**
+   * Capture each dot's cx/cy/payload as it renders, so onMouseMove can
+   * find the nearest dot by Euclidean distance.
+   */
   function renderDot(props) {
-    return (
-      <ClickableListingDot
-        {...props}
-        onHover={onDotHover}
-        onLeave={onDotLeave}
-      />
-    );
+    const { cx, cy, index, payload } = props;
+    // Store position for nearest-dot lookup
+    if (cx != null && cy != null && payload) {
+      dotPositionsRef.current[index] = { cx, cy, payload };
+    }
+    return <ClickableListingDot {...props} />;
+  }
+
+  function handleMouseMove(e) {
+    if (!e || !e.chartX || !e.chartY) return;
+    const { chartX, chartY } = e;
+    const dots = dotPositionsRef.current;
+    if (!dots.length) return;
+
+    let nearest = null;
+    let minDist = Infinity;
+    for (const dot of dots) {
+      if (!dot) continue;
+      const dx = dot.cx - chartX;
+      const dy = dot.cy - chartY;
+      const dist = dx * dx + dy * dy;
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = dot;
+      }
+    }
+
+    // Only show tooltip if cursor is within 30px of a dot
+    if (nearest && Math.sqrt(minDist) < 30) {
+      setHovered({ point: nearest.payload, cx: nearest.cx, cy: nearest.cy });
+    } else {
+      setHovered(null);
+    }
+  }
+
+  function handleMouseLeave() {
+    setHovered(null);
   }
 
   return (
     <div className="price-chart" style={{ position: 'relative' }}>
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+        <LineChart
+          data={data}
+          margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
             dataKey="date"
