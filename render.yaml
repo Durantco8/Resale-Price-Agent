@@ -24,6 +24,16 @@ services:
         sync: false
       - key: POLLER_OWNER
         sync: false
+      - key: NOTIFY_TO
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
       - key: PYTHON_VERSION
         value: "3.12"
 
