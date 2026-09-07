@@ -21,10 +21,11 @@ from resale_price_agent.db import (
     get_snapshots_for_item,
     get_tracked_item,
     metadata,
+    normalize_query,
+    suggest_tracked_items,
     unsubscribe_by_token,
 )
 from resale_price_agent.conditions import label_listings
-from resale_price_agent.search import search
 from resale_price_agent.signals import compute_signals, compute_signals_by_condition
 
 
@@ -58,6 +59,22 @@ def create_app(config=None):
     # Routes
     # ------------------------------------------------------------------
 
+    @app.route("/api/suggest")
+    def api_suggest():
+        q = request.args.get("q", "").strip()
+        if not q or len(q) < 2:
+            return jsonify([])
+        items = suggest_tracked_items(engine, q)
+        return jsonify([
+            {
+                "id": item["id"],
+                "display_name": item["display_name"],
+                "image_url": item.get("image_url"),
+                "status": item["status"],
+            }
+            for item in items
+        ])
+
     @app.route("/api/search")
     @limiter.limit(search_limit)
     def api_search():
@@ -65,18 +82,23 @@ def create_app(config=None):
         if not q:
             return jsonify({"error": "Missing or empty 'q' parameter."}), 400
 
-        try:
-            result = search(engine, q)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+        # Search only returns existing tracked items — no auto-creation
+        items = suggest_tracked_items(engine, q, limit=1)
+        if not items:
+            return jsonify({"error": "No tracked items match your search. Try browsing trending items or request a card to be tracked."}), 404
+
+        item = items[0]
+        item_id = item["id"]
+        item_snapshots = get_snapshots_for_item(engine, item_id)
+        item_decisions = get_decisions_for_item(engine, item_id)
 
         return jsonify({
-            "tracked_item": _serialize_item(result["tracked_item"]),
-            "created": result["created"],
-            "status": result["status"],
-            "snapshot_count": result["snapshot_count"],
-            "snapshots": [_serialize_row(s) for s in result["snapshots"]],
-            "decisions": [_serialize_row(d) for d in result["decisions"]],
+            "tracked_item": _serialize_item(item),
+            "created": False,
+            "status": item["status"],
+            "snapshot_count": len(item_snapshots),
+            "snapshots": [_serialize_row(s) for s in item_snapshots],
+            "decisions": [_serialize_row(d) for d in item_decisions],
         })
 
     @app.route("/api/alerts", methods=["POST"])

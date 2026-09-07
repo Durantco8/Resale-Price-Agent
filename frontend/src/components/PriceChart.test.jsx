@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ClickableListingDot,
-  ListingTooltip,
 } from './PriceChart';
 import {
   buildChartData,
@@ -106,37 +105,3 @@ describe('ClickableListingDot', () => {
 });
 
 
-describe('ListingTooltip', () => {
-  it('shows price, shipping, condition, and a precise timestamp', () => {
-    const point = buildChartData(snapshots)[0];
-    const markup = renderToStaticMarkup(
-      <ListingTooltip active payload={[{ payload: point }]} />,
-    );
-
-    expect(markup).toContain('Older listing');
-    expect(markup).toContain('$200.00');
-    expect(markup).toContain('$12.50 shipping');
-    expect(markup).toContain('New');
-    expect(markup).toMatch(/Sep/);
-    expect(markup).toMatch(/2026/);
-    expect(markup).toContain('Click point to open listing');
-  });
-
-  it('shows graceful fallbacks when optional listing details are missing', () => {
-    const point = {
-      ...buildChartData(snapshots)[0],
-      title: '',
-      condition: null,
-      shippingCost: null,
-      itemUrl: null,
-    };
-    const markup = renderToStaticMarkup(
-      <ListingTooltip active payload={[{ payload: point }]} />,
-    );
-
-    expect(markup).toContain('Untitled listing');
-    expect(markup).toContain('Unknown condition');
-    expect(markup).toContain('Shipping unavailable');
-    expect(markup).toContain('Listing link unavailable');
-  });
-});

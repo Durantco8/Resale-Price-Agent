@@ -24,7 +24,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    func,
     inspect,
+    or_,
     text,
 )
 
@@ -389,6 +391,24 @@ def get_seeded_items(engine) -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(
             tracked_items.select().where(tracked_items.c.is_seeded == True)  # noqa: E712
+        ).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+
+def suggest_tracked_items(engine, query: str, limit: int = 8) -> list[dict]:
+    """Return tracked items whose display_name contains *query* (case-insensitive)."""
+    pattern = f"%{query}%"
+    with engine.connect() as conn:
+        rows = conn.execute(
+            tracked_items.select()
+            .where(
+                or_(
+                    func.lower(tracked_items.c.display_name).contains(query.lower()),
+                    func.lower(tracked_items.c.search_query).contains(query.lower()),
+                )
+            )
+            .order_by(tracked_items.c.display_name)
+            .limit(limit)
         ).fetchall()
         return [dict(r._mapping) for r in rows]
 

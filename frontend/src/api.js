@@ -13,6 +13,10 @@ export function searchItem(query) {
   return request(`/api/search?q=${encodeURIComponent(query)}`);
 }
 
+export function suggestItems(query) {
+  return request(`/api/suggest?q=${encodeURIComponent(query)}`);
+}
+
 export function getItem(id) {
   return request(`/api/items/${id}`);
 }

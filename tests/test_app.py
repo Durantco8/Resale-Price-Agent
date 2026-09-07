@@ -54,15 +54,10 @@ def rate_limited_client(engine):
 # ---------------------------------------------------------------------------
 
 class TestSearch:
-    def test_new_search(self, client, engine):
+    def test_untracked_item_returns_404(self, client, engine):
         resp = client.get("/api/search?q=Jordan 4 Retro")
-        assert resp.status_code == 200
-
-        data = resp.get_json()
-        assert data["created"] is True
-        assert data["status"] == "collecting"
-        assert data["snapshot_count"] == 0
-        assert data["tracked_item"]["normalized_query"] == "jordan 4 retro"
+        assert resp.status_code == 404
+        assert "error" in resp.get_json()
 
     def test_existing_search(self, client, engine):
         get_or_create_tracked_item(engine, "Jordan 4 Retro")
@@ -87,11 +82,6 @@ class TestSearch:
         assert len(data["snapshots"]) == 1
         assert len(data["decisions"]) == 1
 
-    def test_dedupes_across_casing(self, client, engine):
-        client.get("/api/search?q=Jordan 4 Retro")
-        resp = client.get("/api/search?q=jordan 4 retro")
-        assert resp.get_json()["created"] is False
-
     def test_empty_query_400(self, client):
         resp = client.get("/api/search?q=")
         assert resp.status_code == 400
@@ -100,6 +90,31 @@ class TestSearch:
     def test_missing_query_400(self, client):
         resp = client.get("/api/search")
         assert resp.status_code == 400
+
+
+class TestSuggest:
+    def test_returns_matching_items(self, client, engine):
+        get_or_create_tracked_item(engine, "Charizard Base Set Holo")
+        get_or_create_tracked_item(engine, "Charizard VMAX")
+        get_or_create_tracked_item(engine, "Pikachu Base Set")
+
+        resp = client.get("/api/suggest?q=Charizard")
+        data = resp.get_json()
+
+        assert resp.status_code == 200
+        assert len(data) == 2
+        names = [item["display_name"] for item in data]
+        assert "Charizard Base Set Holo" in names
+        assert "Charizard VMAX" in names
+
+    def test_short_query_returns_empty(self, client):
+        resp = client.get("/api/suggest?q=C")
+        assert resp.get_json() == []
+
+    def test_no_matches_returns_empty(self, client, engine):
+        get_or_create_tracked_item(engine, "Charizard Base Set")
+        resp = client.get("/api/suggest?q=Pikachu")
+        assert resp.get_json() == []
 
 
 # ---------------------------------------------------------------------------
@@ -253,12 +268,14 @@ class TestItemDetail:
 # ---------------------------------------------------------------------------
 
 class TestRateLimiting:
-    def test_search_rate_limit(self, rate_limited_client):
+    def test_search_rate_limit(self, rate_limited_client, engine):
         # 3/minute limit — first 3 should pass, 4th should be blocked
         for i in range(3):
+            get_or_create_tracked_item(engine, f"item{i}")
             resp = rate_limited_client.get(f"/api/search?q=item{i}")
             assert resp.status_code == 200
 
+        get_or_create_tracked_item(engine, "item99")
         resp = rate_limited_client.get("/api/search?q=item99")
         assert resp.status_code == 429
 
