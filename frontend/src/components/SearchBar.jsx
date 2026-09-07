@@ -77,13 +77,7 @@ export default function SearchBar({ large = false }) {
     const q = query.trim();
     if (!q) return;
 
-    // If user selected a suggestion with arrow keys, go there
-    if (activeIndex >= 0 && suggestions[activeIndex]) {
-      selectItem(suggestions[activeIndex]);
-      return;
-    }
-
-    // Otherwise, fetch and show all results below
+    // Fetch and show all results below
     setShowDropdown(false);
     try {
       const items = await suggestItems(q);
