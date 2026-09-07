@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer,
@@ -14,8 +14,8 @@ import {
 
 
 /**
- * Simple visible dot — no hit area, no hover logic.
- * All hover detection is handled by the chart-level onMouseMove.
+ * Simple visible dot with click-to-eBay link.
+ * Hover detection is handled at the chart container level.
  */
 export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
   if (cx == null || cy == null || !payload) return null;
@@ -48,8 +48,8 @@ export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
 
 export default function PriceChart({ snapshots }) {
   const [hovered, setHovered] = useState(null);
-  // Store rendered dot positions so we can find the nearest on mousemove
   const dotPositionsRef = useRef([]);
+  const containerRef = useRef(null);
 
   if (!snapshots || snapshots.length === 0) return null;
 
@@ -57,21 +57,33 @@ export default function PriceChart({ snapshots }) {
   if (data.length === 0) return null;
 
   /**
-   * Capture each dot's cx/cy/payload as it renders, so onMouseMove can
-   * find the nearest dot by Euclidean distance.
+   * Capture each dot's cx/cy/payload during render so we can find
+   * the nearest dot on mousemove using Euclidean distance.
    */
   function renderDot(props) {
     const { cx, cy, index, payload } = props;
-    // Store position for nearest-dot lookup
     if (cx != null && cy != null && payload) {
       dotPositionsRef.current[index] = { cx, cy, payload };
     }
     return <ClickableListingDot {...props} />;
   }
 
+  /**
+   * Native mousemove on the container div.  We convert the page
+   * coordinates to the SVG coordinate system so we can compare
+   * against the stored dot cx/cy values directly.
+   */
   function handleMouseMove(e) {
-    if (!e || !e.chartX || !e.chartY) return;
-    const { chartX, chartY } = e;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
     const dots = dotPositionsRef.current;
     if (!dots.length) return;
 
@@ -79,8 +91,8 @@ export default function PriceChart({ snapshots }) {
     let minDist = Infinity;
     for (const dot of dots) {
       if (!dot) continue;
-      const dx = dot.cx - chartX;
-      const dy = dot.cy - chartY;
+      const dx = dot.cx - mouseX;
+      const dy = dot.cy - mouseY;
       const dist = dx * dx + dy * dy;
       if (dist < minDist) {
         minDist = dist;
@@ -88,7 +100,6 @@ export default function PriceChart({ snapshots }) {
       }
     }
 
-    // Only show tooltip if cursor is within 30px of a dot
     if (nearest && Math.sqrt(minDist) < 30) {
       setHovered({ point: nearest.payload, cx: nearest.cx, cy: nearest.cy });
     } else {
@@ -101,14 +112,18 @@ export default function PriceChart({ snapshots }) {
   }
 
   return (
-    <div className="price-chart" style={{ position: 'relative' }}>
+    <div
+      className="price-chart"
+      style={{ position: 'relative' }}
+      ref={containerRef}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart
           data={data}
           margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
