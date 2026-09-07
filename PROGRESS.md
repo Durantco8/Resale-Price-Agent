@@ -1,12 +1,12 @@
 # Resale Price Agent — Progress Summary
 
-*Last updated: Sep 4, 2026 (Session 10, UTC fix + trending card polish + deployment). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
+*Last updated: Sep 7, 2026 (Session 15, search bar overhaul + card request system). This file replaces all earlier progress-summary docs — treat this as the single source of truth. Have Claude Code or Codex read it first when starting a new session.*
 
 **Project path:** `/Users/durantco/Documents/RESUME PROJECTS/Resale Price Agent`
 **GitHub:** `Durantco8/Resale-Price-Agent`
 **Live site:** `resale-price-agent.vercel.app` (frontend) / `resale-price-agent.onrender.com` (API)
 **Stack:** Python CLI pipeline + Flask backend + React (Vite) frontend + **Postgres on Render** (migrated from SQLite in Session 9)
-**Purpose:** Started as a personal eBay resale price-tracking agent, evolved into a public-facing site where any user can search an item, view price trends, and (eventually) sign up for email alerts.
+**Purpose:** Started as a personal eBay resale price-tracking agent, evolved into **PokéTracker** — a public-facing Pokemon card price tracker where users can search tracked cards, view eBay price history and trends, see per-listing Good Buy / Fair Price / Overpriced labels, and request new cards to be tracked.
 
 ---
 
@@ -182,12 +182,13 @@ This backlog is no longer a core-product task. A similar queue may be useful lat
 
 ---
 
-## 11. Not Yet Started
+## 11. Not Yet Started / Deferred
 
 - ~~SQLite → Postgres migration / Render deployment~~ — **Done (Session 9).**
-- **A dedicated personal "test item"** for CD to watch agent behavior (notifications, trend accumulation) over several days once things are stable.
-- **Public alert subscriptions** — `process_alerts()` exists and is tested. The site is now deployed; real public usage can begin.
-- **Category filtering on trending grid** — 75 cards is a lot to scroll. A tab bar (Electronics, Sneakers, Trading Cards, etc.) would make the homepage more navigable.
+- ~~Category filtering on trending grid~~ — **Done (Session 11).** Condition tabs (All / Graded / Raw) added to item detail page.
+- ~~User searches auto-create tracked items~~ — **Removed (Session 15).** Search is now discovery-only; card request form added for untracked items.
+- **Sold listing filtering** — Design complete (add `last_seen_poll_id` to snapshots, filter Recent Listings grid). Not yet implemented.
+- **Public alert subscriptions** — `process_alerts()` exists and is tested. The site is deployed; real public usage can begin.
 
 ---
 
@@ -195,7 +196,7 @@ This backlog is no longer a core-product task. A similar queue may be useful lat
 
 - **Personal vs. public separation must be explicit in the schema, never inferred** — the throughline from the original contamination bug through the `owner` field design.
 - **CD's personal item is intentionally not separate infrastructure** — it's a fully public, fully visible tracked item like any other; the only difference is CD also gets a personal email alert on top of the same public behavior everyone else gets (explicitly confirmed as desired).
-- **The system is demand-driven, not exhaustive** — not trying to track "every item on eBay." Curated seed list (baseline content) + real user searches, growing organically. No architecture changes needed as this scales into the hundreds/low-thousands.
+- **The system is curated, not demand-driven** — the site tracks a curated seed list of Pokemon cards. Users can search and discover existing tracked items, but cannot auto-create new ones. A card request form lets users submit requests for review; the site owner decides what to add.
 - **Diagnostic-before-destructive is the standing pattern** — every deletion or reset (DB cleanup checks, both wipes, the targeted cleanup) has been preceded by an explicit "report what's there / propose the plan, don't execute yet" step, with exact row counts reported before any delete runs. **This must continue for any future destructive action, including the eventual SQLite→Postgres migration.**
 - **Verify claims against the actual codebase/DB state rather than trusting prior documentation** — the SQLite/Postgres correction (Section 8) is a direct lesson: earlier assumptions were wrong and went uncorrected for a while. When in doubt, check.
 - **Test-first development** — permanent project standard. When implementing new code or fixing a bug: (1) write or update the relevant test first, (2) run it and confirm it fails for the expected reason, (3) implement the smallest code change needed to make it pass, (4) run the targeted test again, (5) run the broader relevant test set, (6) run the full suite before committing. Do not write the implementation first and add tests afterward unless there is a clear reason the change cannot reasonably be tested first — if that exception occurs, explain why before proceeding.
@@ -414,12 +415,104 @@ The custom hover tooltip shows title, price, shipping, condition, and the full o
 
 **Tests:** 320 Python tests passed (318 + 2 new timestamp tests). 7 frontend tests passed. 1 non-blocking google.genai deprecation warning.
 
+### Session 11: Pokemon pivot + condition-segmented stats
+
+**Status: completed, deployed.**
+
+#### Pokemon card pivot
+- Project pivoted from general resale items (sneakers, electronics, etc.) to a dedicated **Pokemon card price tracker** ("PokéTracker").
+- `seed_list.py` — Replaced the 75 mixed-category seed items with 80 curated Pokemon card entries using precise card-number queries (e.g. "Pokemon Charizard 4/102 Base Set holo").
+- `poller.py` (CLI entry point) — Added auto-seed on startup (`seed_all()`) and auto-purge of old non-Pokemon items from the database.
+- Duplicate eBay listing deduplication added: `get_seen_ebay_ids()` prevents re-storing already-seen listings, building wider pricing data over time instead of duplicate snapshots.
+
+#### Condition-segmented stats
+- `signals.py` — Added `compute_signals_by_condition()` which groups snapshots by normalized condition tier (Graded, Raw, etc.) and computes independent TrendSignals per tier.
+- `conditions.py` — Added `normalizeCondition()` mapping, `label_listings()` for per-listing Good Buy / Fair Price / Overpriced labels based on per-condition medians.
+- `app.py` — `/api/items/<id>` now returns `signals_by_condition` and `listing_labels`.
+- `ConditionTabs.jsx` — New component: tab bar (All / Graded / Raw) filters chart, stats, and listings by condition.
+- `ItemPage.jsx` — Integrated condition tabs, passes filtered snapshots and per-condition signals to child components.
+
+### Session 12: Recommendation banner removal + per-listing labels
+
+**Status: completed, deployed.**
+
+- **Removed** the top-level "RECOMMENDATION" banner from item detail pages (`RecommendationBanner.jsx` deleted).
+- Per-listing labels (Good Buy / Fair Price / Overpriced) remain on individual listings in the Recent Listings grid — these are driven by the condition-segmented median comparison, not the deterministic recommendation engine.
+- `app.py` — Removed `get_latest_deterministic_recommendation` calls and `recommendation` key from both `/api/items/<id>` and `/api/trending` responses.
+- `TrendingGrid.jsx` — Removed `actionLabel`/`actionClass` functions and recommendation display from homepage cards.
+
+### Session 13: Card images + listing grid redesign
+
+**Status: completed, deployed.**
+
+#### eBay listing images
+- `ebay_client.py` — Added `image_url` field to `ListingSnapshot` dataclass, extracted from eBay's `image.imageUrl`.
+- `db.py` — Added `image_url` column to both `tracked_items` (generic card thumbnail) and `snapshots` (per-listing image) tables. Added `update_tracked_item_image()` and `backfill_snapshot_images()`.
+- `poller.py` — Stores per-listing images via `snapshot_to_dict()`. Saves first listing's image as generic card thumbnail on `tracked_items`. Backfills existing snapshots missing images during each poll by matching current eBay results.
+- Schema migration in CLI `poller.py` for both new `image_url` columns.
+
+#### Frontend image integration
+- `TrendingGrid.jsx` — Homepage cards now show generic card thumbnail images.
+- `ItemPage.jsx` — Item header shows card image alongside title.
+- `RecentListings.jsx` — Rewritten from stacked rows to a **4-column grid layout** with per-listing eBay thumbnails. Deduplicates by `ebay_item_id` (keeps newest), prioritizes listings with images, shows up to 20 sorted by price.
+- Renamed section heading from "Current Listings" to "Recent Listings Tracked (Last 20)".
+
+#### Layout changes
+- Moved PriceChart above the listings grid on item detail page.
+- `ListingStats.jsx` — LISTINGS count now uses `totalListings` (filtered snapshot count) to match the graph.
+- Show all deduplicated listings (up to 20) instead of just latest poll batch.
+
+### Session 14: Chart tooltip accuracy
+
+**Status: completed, deployed.**
+
+Multiple iterations to fix chart tooltip showing wrong listing data when hovering dots:
+
+- **Root cause:** Recharts categorical X-axis plots multiple dots at the same X position (same date). Large invisible hit areas (radius 10-15px) overlapped, causing hover events to fire on the wrong dot.
+- **Final fix:** Replaced per-dot hit areas with a **chart-level native `onMouseMove`** handler. Uses `getBoundingClientRect()` to map cursor position to SVG coordinates, then finds the nearest dot by Euclidean distance. Tooltip positioned to the right of the dot so it doesn't obscure the hovered point.
+- Removed the old `ListingTooltip` component (was a Recharts Tooltip wrapper). Tooltip is now rendered as an absolutely positioned div driven by React state.
+- Updated frontend tests: removed `ListingTooltip` tests (component no longer exists).
+
+### Session 15: Search bar overhaul + card request system
+
+**Status: completed, deployed.**
+
+#### Autocomplete search
+- `db.py` — Added `suggest_tracked_items(engine, query, limit)` with case-insensitive substring matching on `display_name` and `search_query`.
+- `app.py` — New `/api/suggest?q=...` endpoint returns up to 8 matching tracked items with `id`, `display_name`, `image_url`, `status`.
+- `api.js` — Added `suggestItems()` API call.
+- `SearchBar.jsx` — Complete rewrite:
+  - **Typeahead dropdown** appears as user types (debounced 250ms), showing matching items with thumbnails.
+  - **Keyboard navigation:** arrow keys + Enter to select from dropdown.
+  - **Search button** fetches and displays all matching results as a card grid below the search bar (does not auto-select first result).
+  - Results clear on navigation (clicking logo, browser back).
+
+#### Removed auto-tracking
+- **Search no longer creates new tracked items.** `/api/search` returns 404 for untracked items instead of silently creating them.
+- `search.py` module retained for backward compatibility but no longer used by the web app.
+- Updated `test_app.py`: replaced `test_new_search` (expected 200 + created) with `test_untracked_item_returns_404`. Added `TestSuggest` class with 3 tests.
+
+#### Card tracking request form
+- `app.py` — New `POST /api/request-card` endpoint. Sends email to `NOTIFY_TO` via existing SMTP setup. Rate-limited.
+- `api.js` — Added `requestCard()` API call.
+- `SearchBar.jsx` — When search has no results, shows a styled "No results found" card:
+  1. User clicks "Request Tracking" → form expands
+  2. **Full card name** (required, pre-filled with search query)
+  3. **Additional details** (optional — set name, card number, condition, grading)
+  4. "Submit Request" sends email to site owner
+  5. Success/error states displayed inline
+- `render.yaml` — Added `NOTIFY_TO` and SMTP env vars to web service (previously only on cron worker).
+
+#### Cron schedule
+- Poller changed from every 12 hours to **once daily at midnight UTC** (`0 0 * * *`).
+
+**Tests:** 365 Python tests passed. 5 frontend tests passed.
+
 ### Current cautions / unresolved context
 
-- **Live Postgres state (Render):** 75 tracked items, ~200 snapshots per item, 4 poll batches accumulated. All items currently WAIT with 0.2 confidence (insufficient history — only ~8 hours of data). Trends will improve as daily polls accumulate.
+- **Live Postgres state (Render):** 80 tracked Pokemon card items with multiple poll batches accumulated. Trends improving as daily polls accumulate.
 - Gemini reasoning runs in the poller but is not exposed in the UI (Analysis Log removed). It remains in place for eventual optional `llm_analysis`.
 - The `active` status threshold is still row-count based (≥5 snapshots), not batch-maturity based. The deterministic engine's Gate 0 (`sufficient_data`) handles this at the recommendation level.
 - `tracked_items` still has no `target_price` column configurable from the UI.
-- Sneaker counterfeit detection remains an open data-quality issue.
-- User searches automatically create new tracked items that get polled going forward. No hard limit on tracked item count.
-- Render cron polls once daily at 8 AM UTC (4 AM Eastern). Render Starter plan costs ~$7/month per service (~$14/month total for web + cron). Postgres is free tier.
+- **Sold/removed listings:** Snapshots for sold eBay listings remain in the database and appear on the price chart (intentional — historical data). They may also appear in the Recent Listings grid linking to dead eBay pages. A `last_seen_poll_id` approach was designed but not yet implemented.
+- Render cron polls once daily at midnight UTC. Render Starter plan costs ~$7/month per service (~$14/month total for web + cron). Postgres is free tier.
