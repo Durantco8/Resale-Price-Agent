@@ -14,34 +14,15 @@ import {
 
 
 /**
- * Simple visible dot with click-to-eBay link.
- * Hover detection is handled at the chart container level.
+ * Simple visible dot — no click handling here.
+ * Both hover and click are handled at the chart container level
+ * via nearest-dot detection to avoid SVG stacking issues.
  */
 export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
   if (cx == null || cy == null || !payload) return null;
 
-  const dot = (
-    <circle cx={cx} cy={cy} r={radius} className="price-chart__dot" />
-  );
-
-  if (!payload.itemUrl) {
-    return (
-      <g className="price-chart__dot--unavailable" aria-label="Listing link unavailable">
-        {dot}
-      </g>
-    );
-  }
-
   return (
-    <a
-      href={payload.itemUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label={`Open ${payload.title || 'listing'} on eBay`}
-      className="price-chart__dot-link"
-    >
-      {dot}
-    </a>
+    <circle cx={cx} cy={cy} r={radius} className="price-chart__dot" style={{ pointerEvents: 'none' }} />
   );
 }
 
@@ -111,13 +92,50 @@ export default function PriceChart({ snapshots }) {
     setHovered(null);
   }
 
+  /**
+   * Click handler uses the same nearest-dot detection as hover,
+   * so the dot you see in the tooltip is always the one that opens.
+   */
+  function handleClick(e) {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const dots = dotPositionsRef.current;
+    if (!dots.length) return;
+
+    let nearest = null;
+    let minDist = Infinity;
+    for (const dot of dots) {
+      if (!dot) continue;
+      const dx = dot.cx - mouseX;
+      const dy = dot.cy - mouseY;
+      const dist = dx * dx + dy * dy;
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = dot;
+      }
+    }
+
+    if (nearest && Math.sqrt(minDist) < 30 && nearest.payload.itemUrl) {
+      window.open(nearest.payload.itemUrl, '_blank', 'noopener,noreferrer');
+    }
+  }
+
   return (
     <div
       className="price-chart"
-      style={{ position: 'relative' }}
+      style={{ position: 'relative', cursor: hovered?.point?.itemUrl ? 'pointer' : 'default' }}
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
     >
       <h3>Price History</h3>
       <ResponsiveContainer width="100%" height={300}>

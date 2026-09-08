@@ -81,26 +81,27 @@ describe('smart date axis', () => {
 
 
 describe('ClickableListingDot', () => {
-  it('renders a safe new-tab link for a point with a listing URL', () => {
+  it('renders a plain circle with pointer-events disabled', () => {
     const point = buildChartData(snapshots)[0];
     const markup = renderToStaticMarkup(
       <svg><ClickableListingDot cx={20} cy={30} payload={point} /></svg>,
     );
 
-    expect(markup).toContain('href="https://www.ebay.com/itm/111"');
-    expect(markup).toContain('target="_blank"');
-    expect(markup).toContain('rel="noopener noreferrer"');
-    expect(markup).toContain('aria-label="Open Older listing on eBay"');
+    expect(markup).toContain('<circle');
+    expect(markup).toContain('price-chart__dot');
+    expect(markup).toContain('pointer-events:none');
+    // No <a> links — clicks are handled at the container level
+    expect(markup).not.toContain('<a');
   });
 
-  it('keeps a missing-URL point visible but non-clickable', () => {
+  it('renders the same circle even without a URL', () => {
     const point = { ...buildChartData(snapshots)[0], itemUrl: null };
     const markup = renderToStaticMarkup(
       <svg><ClickableListingDot cx={20} cy={30} payload={point} /></svg>,
     );
 
     expect(markup).not.toContain('<a');
-    expect(markup).toContain('price-chart__dot--unavailable');
+    expect(markup).toContain('<circle');
   });
 });
 
