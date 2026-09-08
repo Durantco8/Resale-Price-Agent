@@ -84,6 +84,21 @@ class EbayTokenFetcher:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _build_listing_url(item_id: str) -> str:
+    """Build a direct eBay listing URL from an API item ID.
+
+    The Browse API returns IDs like ``v1|123456789012|0``.  The middle
+    segment is the actual listing number used in ``/itm/`` URLs.
+    """
+    parts = item_id.split("|")
+    listing_id = parts[1] if len(parts) >= 2 else item_id
+    return f"https://www.ebay.com/itm/{listing_id}"
+
+
+# ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
 
@@ -151,7 +166,7 @@ class EbayClient:
                     seller_feedback_score=int(
                         item.get("seller", {}).get("feedbackScore", 0)
                     ),
-                    item_url=item.get("itemWebUrl", ""),
+                    item_url=_build_listing_url(item.get("itemId", "")),
                     shipping_cost=(
                         float(shipping_cost_raw)
                         if shipping_cost_raw is not None

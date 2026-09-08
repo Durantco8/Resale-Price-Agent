@@ -148,6 +148,13 @@ def get_engine(db_url: str | None = None):
     return engine
 
 
+def _extract_listing_url(ebay_item_id: str) -> str:
+    """Build an eBay /itm/ URL from a stored item ID like ``v1|123456|0``."""
+    parts = ebay_item_id.split("|")
+    listing_id = parts[1] if len(parts) >= 2 else ebay_item_id
+    return f"https://www.ebay.com/itm/{listing_id}"
+
+
 def _legacy_poll_batch_id(tracked_item_id: int, snapshot_time) -> str:
     """Build a stable batch ID for legacy rows sharing item + timestamp."""
     identity = f"resale-price-agent:{tracked_item_id}:{snapshot_time}"
@@ -218,6 +225,34 @@ def _migrate_schema(engine) -> None:
                 "ruleset_version) "
                 "WHERE event_type = 'deterministic_recommendation'"
             ))
+
+    # --- Fix snapshot URLs: rewrite /p/ product pages to /itm/ listing URLs ---
+    if "snapshots" in inspector.get_table_names():
+        snap_cols = {c["name"] for c in inspector.get_columns("snapshots")}
+        if "ebay_item_id" in snap_cols and "item_url" in snap_cols:
+            with engine.begin() as conn:
+                # ebay_item_id is stored as "v1|123456|0"; extract the middle
+                # segment for the /itm/ URL.  Works on both SQLite and Postgres.
+                bad_rows = conn.execute(
+                    text(
+                        "SELECT id, ebay_item_id FROM snapshots "
+                        "WHERE item_url LIKE '%/p/%' "
+                        "AND ebay_item_id IS NOT NULL AND ebay_item_id != ''"
+                    )
+                ).mappings().all()
+                if bad_rows:
+                    conn.execute(
+                        text(
+                            "UPDATE snapshots SET item_url = :url WHERE id = :sid"
+                        ),
+                        [
+                            {
+                                "sid": row["id"],
+                                "url": _extract_listing_url(row["ebay_item_id"]),
+                            }
+                            for row in bad_rows
+                        ],
+                    )
 
 
 # ---------------------------------------------------------------------------
