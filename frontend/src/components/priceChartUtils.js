@@ -53,6 +53,13 @@ export function formatYAxisPrice(value) {
 }
 
 
+export function filterSnapshotsByRange(snapshots, rangeDays) {
+  if (rangeDays == null) return snapshots;
+  const cutoff = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+  return snapshots.filter(s => Date.parse(s.snapshot_time) >= cutoff);
+}
+
+
 export function buildChartData(snapshots) {
   const sorted = [...snapshots].reverse();
   const timestamps = sorted.map(s => Date.parse(s.snapshot_time));

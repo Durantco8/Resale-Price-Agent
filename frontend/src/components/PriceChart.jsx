@@ -6,6 +6,7 @@ import {
 
 import {
   buildChartData,
+  filterSnapshotsByRange,
   formatMoney,
   formatShipping,
   formatTooltipTimestamp,
@@ -46,14 +47,21 @@ export function ClickableListingDot({ cx, cy, payload, radius = 3 }) {
 }
 
 
+const RANGE_OPTIONS = [
+  { label: '5D', days: 5 },
+  { label: '30D', days: 30 },
+];
+
 export default function PriceChart({ snapshots }) {
   const [hovered, setHovered] = useState(null);
+  const [rangeDays, setRangeDays] = useState(5);
   const dotPositionsRef = useRef([]);
   const containerRef = useRef(null);
 
   if (!snapshots || snapshots.length === 0) return null;
 
-  const data = buildChartData(snapshots);
+  const filtered = filterSnapshotsByRange(snapshots, rangeDays);
+  const data = buildChartData(filtered.length > 0 ? filtered : snapshots);
   if (data.length === 0) return null;
 
   /**
@@ -119,7 +127,20 @@ export default function PriceChart({ snapshots }) {
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
-      <h3>Price History</h3>
+      <div className="price-chart__header">
+        <h3>Price History</h3>
+        <div className="price-chart__range-toggle">
+          {RANGE_OPTIONS.map(({ label, days }) => (
+            <button
+              key={days}
+              className={`price-chart__range-btn${rangeDays === days ? ' price-chart__range-btn--active' : ''}`}
+              onClick={() => setRangeDays(days)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart
           data={data}

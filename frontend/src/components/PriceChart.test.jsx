@@ -7,6 +7,7 @@ import {
 } from './PriceChart';
 import {
   buildChartData,
+  filterSnapshotsByRange,
   formatDate,
 } from './priceChartUtils';
 
@@ -76,6 +77,42 @@ describe('smart date axis', () => {
     const data = buildChartData(multiDay);
 
     expect(data[0].date).toBe(formatDate(data[0].timestampIso));
+  });
+});
+
+
+describe('filterSnapshotsByRange', () => {
+  const now = Date.now();
+  const daysAgo = (n) => new Date(now - n * 86400000).toISOString();
+
+  const rangeSnapshots = [
+    { ...snapshots[0], id: 1, snapshot_time: daysAgo(1) },
+    { ...snapshots[0], id: 2, snapshot_time: daysAgo(3) },
+    { ...snapshots[0], id: 3, snapshot_time: daysAgo(4) },
+    { ...snapshots[0], id: 4, snapshot_time: daysAgo(15) },
+    { ...snapshots[0], id: 5, snapshot_time: daysAgo(40) },
+  ];
+
+  it('filters to the specified day range', () => {
+    const result = filterSnapshotsByRange(rangeSnapshots, 5);
+    expect(result.map(s => s.id)).toEqual([1, 2, 3]);
+  });
+
+  it('returns all snapshots when rangeDays is null', () => {
+    const result = filterSnapshotsByRange(rangeSnapshots, null);
+    expect(result).toHaveLength(5);
+  });
+
+  it('returns available data when less than rangeDays exist', () => {
+    const recent = rangeSnapshots.slice(0, 2); // only 1 and 3 days old
+    const result = filterSnapshotsByRange(recent, 30);
+    expect(result).toHaveLength(2);
+  });
+
+  it('returns empty array when no data in range', () => {
+    const old = [{ ...snapshots[0], snapshot_time: daysAgo(60) }];
+    const result = filterSnapshotsByRange(old, 5);
+    expect(result).toHaveLength(0);
   });
 });
 
