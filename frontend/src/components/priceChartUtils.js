@@ -53,6 +53,18 @@ export function formatYAxisPrice(value) {
 }
 
 
+export function filterChartOutliers(snapshots) {
+  if (snapshots.length < 5) return snapshots;
+  const prices = snapshots.map(s => s.price).sort((a, b) => a - b);
+  const q1 = prices[Math.floor(prices.length * 0.25)];
+  const q3 = prices[Math.floor(prices.length * 0.75)];
+  const iqr = q3 - q1;
+  const upper = q3 + 3 * iqr;
+  const lower = q1 - 3 * iqr;
+  return snapshots.filter(s => s.price >= lower && s.price <= upper);
+}
+
+
 export function filterSnapshotsByRange(snapshots, rangeDays) {
   if (rangeDays == null) return snapshots;
   const cutoff = Date.now() - rangeDays * 24 * 60 * 60 * 1000;

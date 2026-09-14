@@ -6,6 +6,7 @@ import {
 
 import {
   buildChartData,
+  filterChartOutliers,
   filterSnapshotsByRange,
   formatMoney,
   formatShipping,
@@ -60,7 +61,8 @@ export default function PriceChart({ snapshots }) {
 
   if (!snapshots || snapshots.length === 0) return null;
 
-  const filtered = filterSnapshotsByRange(snapshots, rangeDays);
+  const byRange = filterSnapshotsByRange(snapshots, rangeDays);
+  const filtered = filterChartOutliers(byRange.length > 0 ? byRange : snapshots);
   const data = buildChartData(filtered.length > 0 ? filtered : snapshots);
   if (data.length === 0) return null;
 

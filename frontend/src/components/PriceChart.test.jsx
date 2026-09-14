@@ -7,6 +7,7 @@ import {
 } from './PriceChart';
 import {
   buildChartData,
+  filterChartOutliers,
   filterSnapshotsByRange,
   formatDate,
 } from './priceChartUtils';
@@ -113,6 +114,36 @@ describe('filterSnapshotsByRange', () => {
     const old = [{ ...snapshots[0], snapshot_time: daysAgo(60) }];
     const result = filterSnapshotsByRange(old, 5);
     expect(result).toHaveLength(0);
+  });
+});
+
+
+describe('filterChartOutliers', () => {
+  const makeSnap = (price) => ({ ...snapshots[0], price });
+
+  it('removes extreme outliers using IQR', () => {
+    // Prices clustered around 200-400, with one extreme outlier at 17000
+    const input = [
+      makeSnap(200), makeSnap(250), makeSnap(300), makeSnap(350),
+      makeSnap(400), makeSnap(333), makeSnap(280), makeSnap(17000),
+    ];
+    const result = filterChartOutliers(input);
+    expect(result.every(s => s.price <= 1000)).toBe(true);
+    expect(result).toHaveLength(7);
+  });
+
+  it('keeps all data when no outliers exist', () => {
+    const input = [
+      makeSnap(200), makeSnap(250), makeSnap(300), makeSnap(350), makeSnap(400),
+    ];
+    const result = filterChartOutliers(input);
+    expect(result).toHaveLength(5);
+  });
+
+  it('returns all data when fewer than 5 snapshots', () => {
+    const input = [makeSnap(100), makeSnap(50000)];
+    const result = filterChartOutliers(input);
+    expect(result).toHaveLength(2);
   });
 });
 
